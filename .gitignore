@@ -1,0 +1,31 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# environment
+.env
+.env.local
+.env.*.local
+
+# logs
+*.log
+logs/
+
+# os files
+.DS_Store
+Thumbs.db
+
+# ide
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# test coverage
+coverage/
+
+# temp files
+tmp/
+temp/

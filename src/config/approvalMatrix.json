@@ -1,0 +1,27 @@
+{
+  "external_comms": {
+    "requiredSigners": ["tatev", "narek"],
+    "vetoHolders": ["narek", "vagho"]
+  },
+  "product_feature": {
+    "requiredSigners": ["laura", "hamazasp"],
+    "vetoHolders": ["narek", "vagho"],
+    "addSignerIfCostBearing": "arshak"
+  },
+  "spend": {
+    "requiredSigners": ["arshak"],
+    "vetoHolders": []
+  },
+  "investor_material": {
+    "requiredSigners": ["arshak", "narek", "chris"],
+    "vetoHolders": ["narek"]
+  },
+  "technical_change": {
+    "requiredSigners": ["hamazasp", "vagho"],
+    "vetoHolders": ["vagho"]
+  },
+  "generic": {
+    "requiredSigners": ["lilit"],
+    "vetoHolders": []
+  }
+}
