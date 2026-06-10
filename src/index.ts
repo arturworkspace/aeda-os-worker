@@ -12,35 +12,82 @@ let agenda: Agenda | null = null;
 async function main(): Promise<void> {
   logger.info('starting aeda os worker');
 
-  await connectDb();
-  logger.info('database connected');
+  try {
+    await connectDb();
+    logger.info('database connected');
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.error('step failed: connectDb -', err.message, err.stack);
+    throw err;
+  }
 
-  loadApprovalMatrix();
-  await logApprovalMatrixLoaded();
+  try {
+    loadApprovalMatrix();
+    await logApprovalMatrixLoaded();
+    logger.info('approval matrix loaded');
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.error('step failed: loadApprovalMatrix -', err.message, err.stack);
+    throw err;
+  }
 
-  await budgetRepo.seedGlobalBudget();
-  logger.info('global budget seeded');
+  try {
+    await budgetRepo.seedGlobalBudget();
+    logger.info('global budget seeded');
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.error('step failed: seedGlobalBudget -', err.message, err.stack);
+    throw err;
+  }
 
-  await memoryRepo.seedFounderPreferences();
-  logger.info('founder preferences seeded');
+  try {
+    await memoryRepo.seedFounderPreferences();
+    logger.info('founder preferences seeded');
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.error('step failed: seedFounderPreferences -', err.message, err.stack);
+    throw err;
+  }
 
-  agenda = new Agenda({
-    db: { address: env.MONGODB_URI, collection: 'os_agenda_jobs' },
-    processEvery: '1 minute',
-    maxConcurrency: 5,
-  });
+  try {
+    agenda = new Agenda({
+      db: { address: env.MONGODB_URI, collection: 'os_agenda_jobs' },
+      processEvery: '1 minute',
+      maxConcurrency: 5,
+    });
+    logger.info('agenda instance created');
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.error('step failed: agenda creation -', err.message, err.stack);
+    throw err;
+  }
 
-  defineAllJobs(agenda);
+  try {
+    defineAllJobs(agenda);
+    logger.info('jobs defined');
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.error('step failed: defineAllJobs -', err.message, err.stack);
+    throw err;
+  }
 
   agenda.on('ready', async () => {
-    logger.info('agenda ready');
-    await scheduleAllJobs(agenda!);
-    await agenda!.start();
-    logger.info('agenda started');
+    try {
+      logger.info('agenda ready');
+      await scheduleAllJobs(agenda!);
+      await agenda!.start();
+      logger.info('agenda started');
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      console.error('step failed: agenda start/schedule -', err.message, err.stack);
+      logger.fatal({ err: err.message, stack: err.stack }, 'agenda startup failed');
+      process.exit(1);
+    }
   });
 
   agenda.on('error', (error) => {
-    logger.error({ error: error.message }, 'agenda error');
+    console.error('agenda error:', error.message, error.stack);
+    logger.error({ err: error.message, stack: error.stack }, 'agenda error');
   });
 
   agenda.on('start', (job) => {
@@ -52,7 +99,8 @@ async function main(): Promise<void> {
   });
 
   agenda.on('fail', (error, job) => {
-    logger.error({ jobName: job.attrs.name, error: error.message }, 'job failed');
+    console.error('job failed:', job.attrs.name, error.message, error.stack);
+    logger.error({ jobName: job.attrs.name, err: error.message, stack: error.stack }, 'job failed');
   });
 
   logger.info('aeda os worker running');
@@ -76,6 +124,9 @@ process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
 main().catch((error) => {
-  logger.fatal({ error: error.message }, 'fatal error during startup');
+  const err = error instanceof Error ? error : new Error(String(error));
+  console.error('fatal error during startup:', err.message);
+  console.error('stack:', err.stack);
+  logger.fatal({ err: err.message, stack: err.stack }, 'fatal error during startup');
   process.exit(1);
 });
