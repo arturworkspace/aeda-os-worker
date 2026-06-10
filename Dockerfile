@@ -1,12 +1,8 @@
 FROM node:20-slim
-
 WORKDIR /app
-
 COPY package*.json ./
-
-RUN npm ci --omit=dev
-
-COPY dist ./dist
-COPY src/config/approvalMatrix.json ./dist/config/approvalMatrix.json
-
+RUN npm ci
+COPY . .
+RUN npm run build
+RUN npm prune --omit=dev
 CMD ["node", "dist/index.js"]
