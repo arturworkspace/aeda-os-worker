@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp src/config/approvalMatrix.json dist/config/approvalMatrix.json",
     "start": "node dist/index.js",
     "smoke": "tsx scripts/smoke.ts",
     "restore": "tsx scripts/restore.ts",
