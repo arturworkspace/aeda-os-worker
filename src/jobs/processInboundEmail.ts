@@ -142,6 +142,13 @@ ${hardened}${crmContext}`,
       const arturText = getTextContent(arturResult.response);
       const classification = parseArturResponse(arturText);
 
+      console.log(
+        'routing decision: agent=%s draft=%s classification=%s urgency=%s',
+        classification.routing_agent,
+        classification.draft_reply_needed,
+        classification.classification,
+        classification.urgency
+      );
       logger.info(
         {
           routing_agent: classification.routing_agent,

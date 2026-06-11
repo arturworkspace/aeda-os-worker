@@ -1,4 +1,5 @@
 import { simpleParser, ParsedMail, AddressObject } from 'mailparser';
+import { logger } from '../logger.js';
 
 export interface ParsedEmail {
   sender_email: string;
@@ -33,7 +34,15 @@ export async function parseRawEmail(rawBase64: string): Promise<ParsedEmail> {
   const senderName = extractName(parsed.from);
   const toEmail = extractEmailAddress(parsed.to);
 
-  const bodyRaw = parsed.text ?? (typeof parsed.html === 'string' ? parsed.html : '') ?? '';
+  let bodyRaw = parsed.text ?? (typeof parsed.html === 'string' ? parsed.html : '') ?? '';
+
+  if (!bodyRaw || bodyRaw.trim() === '') {
+    logger.warn(
+      { hasText: !!parsed.text, hasHtml: !!parsed.html, subject: parsed.subject },
+      'email body could not be parsed - both text and html are empty'
+    );
+    bodyRaw = '[email body could not be parsed]';
+  }
 
   return {
     sender_email: senderEmail,
