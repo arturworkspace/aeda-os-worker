@@ -109,6 +109,7 @@ function createRawEmail(to: string, subject: string, body: string, inReplyTo?: s
 export interface CreateDraftResult {
   draftId: string;
   messageId: string | null;
+  labelApplied: boolean;
 }
 
 export async function createDraft(
@@ -141,29 +142,52 @@ export async function createDraft(
 
   logger.info({ draftId, messageId }, 'gmail draft created');
 
-  if (pendingSendLabelId && messageId) {
+  let labelApplied = false;
+
+  if (!pendingSendLabelId) {
+    logger.warn({ draftId, messageId }, 'pending send label id is null, skipping label apply');
+  } else if (!draftId) {
+    logger.warn({ pendingSendLabelId }, 'draft id is null, cannot apply label');
+  } else {
+    logger.info(
+      { draftId, messageId, pendingSendLabelId },
+      'attempting to apply pending send label to draft'
+    );
     try {
-      await gmailClient.users.messages.modify({
+      await gmailClient.users.drafts.update({
         userId: 'me',
-        id: messageId,
+        id: draftId,
         requestBody: {
-          addLabelIds: [pendingSendLabelId],
+          message: {
+            labelIds: ['DRAFT', pendingSendLabelId],
+          },
         },
       });
+      labelApplied = true;
       logger.info({ draftId, messageId, labelId: pendingSendLabelId }, 'pending send label applied');
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
+      const fullError = error instanceof Error ? error.stack : String(error);
       await writeAuditEvent({
         actor: 'system',
         actorType: 'system',
         eventType: 'gmail.warning',
-        payload: { warning: 'failed to apply pending send label', error: errMsg, draftId },
+        payload: {
+          warning: 'failed to apply pending send label',
+          error: errMsg,
+          draftId,
+          messageId,
+          pendingSendLabelId,
+        },
       });
-      logger.warn({ error: errMsg, draftId }, 'failed to apply pending send label');
+      logger.error(
+        { error: errMsg, fullError, draftId, messageId, pendingSendLabelId },
+        'failed to apply pending send label'
+      );
     }
   }
 
-  return { draftId, messageId };
+  return { draftId, messageId, labelApplied };
 }
 
 export function isGmailConfigured(): boolean {

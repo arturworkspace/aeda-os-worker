@@ -4,7 +4,7 @@ import { inboxItemRepo } from '../db/repos/inboxItem.repo.js';
 import { emailDraftRepo } from '../db/repos/emailDraft.repo.js';
 import { sanitizeBody, hardenBody } from '../services/emailParser.js';
 import { matchSender } from '../services/crmMatcher.js';
-import { createDraft, isGmailConfigured, getPendingSendLabelId } from '../services/gmail.js';
+import { createDraft, isGmailConfigured } from '../services/gmail.js';
 import { routedCall, getTextContent } from '../core/modelRouter.js';
 import { writeAuditEvent } from '../core/auditLog.js';
 import { getPersona } from '../agents/personas.js';
@@ -192,6 +192,8 @@ Respond with a task ID in format TASK-XXXX and a one-sentence confirmation.`,
               role: 'user',
               content: `Draft a reply to this email. Be professional, concise, and helpful. Always use lowercase "aeda".
 
+Do not add any signature, sign-off, or closing (no "Best regards", no name, no title). End the draft with the last sentence of the body. Artur will add his own signature before sending.
+
 ${hardened}${crmContext}
 
 Brief from Artur: ${classification.brief_for_lilit}
@@ -236,10 +238,7 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
               gmailResult.messageId
             );
 
-            const labelApplied = getPendingSendLabelId() !== null && gmailResult.messageId !== null;
-            await emailDraftRepo.setPendingSendLabelApplied(emailDraftId, labelApplied);
-
-            logger.info({ draftId: gmailResult.draftId, labelApplied }, 'gmail draft created');
+            await emailDraftRepo.setPendingSendLabelApplied(emailDraftId, gmailResult.labelApplied);
           } catch (gmailError) {
             const errMsg = gmailError instanceof Error ? gmailError.message : String(gmailError);
             logger.error({ error: errMsg }, 'gmail draft creation failed');
