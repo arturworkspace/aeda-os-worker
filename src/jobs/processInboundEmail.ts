@@ -72,8 +72,11 @@ function parseDraftResponse(text: string): DraftResponse {
 
 export function defineJob(agenda: Agenda): void {
   agenda.define(JOB_NAME, async (job: Job) => {
-    const data = job.attrs.data as { inbox_item_id?: string } | undefined;
+    const data = job.attrs.data as { inbox_item_id?: string; explicitly_routed_agent?: string } | undefined;
     const inboxItemId = data?.inbox_item_id;
+    const explicitlyRoutedAgent = data?.explicitly_routed_agent ?? null;
+
+    console.log('job data:', { inboxItemId, explicitlyRoutedAgent });
 
     if (!inboxItemId) {
       logger.error('process-inbound-email job missing inbox_item_id');
@@ -142,26 +145,34 @@ ${hardened}${crmContext}`,
       const arturText = getTextContent(arturResult.response);
       const classification = parseArturResponse(arturText);
 
+      const draftNeeded = true;
+      console.log('draft override: draftNeeded forced to true');
+
+      const finalRoutingAgent = explicitlyRoutedAgent ?? classification.routing_agent;
+      console.log('routing override:', { explicitlyRoutedAgent, arturAgent: classification.routing_agent, finalRoutingAgent });
+
       console.log(
-        'routing decision: agent=%s draft=%s classification=%s urgency=%s',
-        classification.routing_agent,
-        classification.draft_reply_needed,
+        'routing decision: agent=%s draft=%s classification=%s urgency=%s mention=%s',
+        finalRoutingAgent,
+        draftNeeded,
         classification.classification,
-        classification.urgency
+        classification.urgency,
+        explicitlyRoutedAgent
       );
       logger.info(
         {
-          routing_agent: classification.routing_agent,
-          draft_reply_needed: classification.draft_reply_needed,
+          routing_agent: finalRoutingAgent,
+          draft_reply_needed: draftNeeded,
           classification: classification.classification,
           urgency: classification.urgency,
+          mention_found: explicitlyRoutedAgent,
         },
         'routing decision'
       );
 
       await inboxItemRepo.updateRouting(inboxItemId, {
         artur_classification: classification.classification,
-        routed_to_agent: classification.routing_agent,
+        routed_to_agent: finalRoutingAgent,
         artur_brief: classification.brief_for_lilit,
       });
 
@@ -200,19 +211,19 @@ Respond with a task ID in format TASK-XXXX and a one-sentence confirmation.`,
       });
 
       logger.info(
-        { draft_reply_needed: classification.draft_reply_needed, classification: classification.classification },
+        { draft_reply_needed: draftNeeded, classification: classification.classification },
         'proceeding to draft generation check'
       );
 
-      if (classification.draft_reply_needed && classification.classification !== 'spam') {
-        logger.info({ draft_reply_needed: true }, 'proceeding to draft generation');
-        const draftingAgent = getPersona(classification.routing_agent) ?? lilitPersona;
+      if (draftNeeded && classification.classification !== 'spam') {
+        logger.info({ draft_reply_needed: draftNeeded }, 'proceeding to draft generation');
+        const draftingAgent = getPersona(finalRoutingAgent) ?? lilitPersona;
 
         const agentName = draftingAgent.name.toUpperCase();
 
         const draftResult = await routedCall({
           tier: 'production',
-          agentOrJob: classification.routing_agent,
+          agentOrJob: finalRoutingAgent,
           system: draftingAgent.systemPrompt + `\n\nYou are drafting a reply email. Return JSON with "subject" and "body" fields.`,
           messages: [
             {
@@ -265,7 +276,7 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
 
         const emailDraft = await emailDraftRepo.create({
           inbox_item_id: new Types.ObjectId(inboxItemId),
-          drafted_by_agent: classification.routing_agent,
+          drafted_by_agent: finalRoutingAgent,
           to: inboxItem.sender_email,
           subject: replySubject,
           body: draftContent.body,

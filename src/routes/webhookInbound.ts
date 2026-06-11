@@ -76,7 +76,16 @@ export function createWebhookRouter(agenda: Agenda): Router {
 
       console.log('parsed sender:', { sender_email, sender_name, rawFrom });
 
+      const rawText = Buffer.from(rawEmail, 'base64').toString('utf-8');
+      console.log('raw text first 300 chars:', rawText.slice(0, 300));
+
+      const mentionMatch = rawText.match(/@(arshak|narek|alex|tatev|hamazasp|chris|laura|anna|vagho|mike|ruzan|sofi|lilit)/i);
+      const explicitly_routed_agent = mentionMatch && mentionMatch[1] ? mentionMatch[1].toLowerCase() : null;
+      console.log('mention detection:', { mentionMatch: mentionMatch?.[0], explicitly_routed_agent });
+
       const parsed = await parseRawEmail(rawEmail);
+      console.log('parsed email text length:', parsed.body_raw?.length);
+      console.log('parsed email subject:', parsed.subject);
 
       const existing = await inboxItemRepo.findByMessageId(parsed.message_id);
       if (existing) {
@@ -98,7 +107,10 @@ export function createWebhookRouter(agenda: Agenda): Router {
 
       const inboxItemId = inboxItem._id?.toString();
 
-      await agenda.now('process-inbound-email', { inbox_item_id: inboxItemId });
+      await agenda.now('process-inbound-email', {
+        inbox_item_id: inboxItemId,
+        explicitly_routed_agent: explicitly_routed_agent,
+      });
 
       logger.info({ inboxItemId, messageId: parsed.message_id }, 'inbound email queued for processing');
 
