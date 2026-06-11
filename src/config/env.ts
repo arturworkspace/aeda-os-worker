@@ -8,6 +8,11 @@ const envSchema = z.object({
   R2_SECRET_ACCESS_KEY: z.string().min(1, 'R2_SECRET_ACCESS_KEY is required'),
   R2_BUCKET: z.string().min(1, 'R2_BUCKET is required'),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
+  PORT: z.string().default('3000'),
+  WEBHOOK_SECRET: z.string().optional(),
+  GMAIL_CLIENT_ID: z.string().optional(),
+  GMAIL_CLIENT_SECRET: z.string().optional(),
+  GMAIL_REFRESH_TOKEN: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

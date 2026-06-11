@@ -2,11 +2,13 @@ import { Agenda } from 'agenda';
 import * as lilitStandup from './heartbeat.lilitStandup.js';
 import * as nightlyBackup from './system.nightlyBackup.js';
 import * as costRollup from './system.costRollup.js';
+import * as processInboundEmail from './processInboundEmail.js';
 
 export function defineAllJobs(agenda: Agenda): void {
   lilitStandup.defineJob(agenda);
   nightlyBackup.defineJob(agenda);
   costRollup.defineJob(agenda);
+  processInboundEmail.defineJob(agenda);
 }
 
 export async function scheduleAllJobs(agenda: Agenda): Promise<void> {
@@ -15,4 +17,4 @@ export async function scheduleAllJobs(agenda: Agenda): Promise<void> {
   await costRollup.scheduleJob(agenda);
 }
 
-export { lilitStandup, nightlyBackup, costRollup };
+export { lilitStandup, nightlyBackup, costRollup, processInboundEmail };

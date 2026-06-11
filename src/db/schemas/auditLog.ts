@@ -11,6 +11,13 @@ export const AUDIT_EVENT_TYPES = [
   'backup.completed',
   'job.run',
   'config.loaded',
+  'email.received',
+  'email_processed',
+  'email_processing_error',
+  'webhook.error',
+  'webhook.auth_failed',
+  'gmail.warning',
+  'gmail.error',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];

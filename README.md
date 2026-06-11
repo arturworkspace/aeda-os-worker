@@ -30,6 +30,11 @@ the always-on spine for aeda operations. this standalone node.js + typescript se
 | `R2_SECRET_ACCESS_KEY` | r2 secret access key |
 | `R2_BUCKET` | r2 bucket name for backups |
 | `LOG_LEVEL` | (optional) log level: trace, debug, info, warn, error, fatal. default: info |
+| `PORT` | (optional) http server port for webhooks. default: 3000 |
+| `WEBHOOK_SECRET` | (optional) shared secret for webhook authentication |
+| `GMAIL_CLIENT_ID` | (optional) google oauth2 client id for gmail api |
+| `GMAIL_CLIENT_SECRET` | (optional) google oauth2 client secret |
+| `GMAIL_REFRESH_TOKEN` | (optional) gmail refresh token for artur@aedawallet.com |
 
 ## deployment (railway)
 
@@ -45,6 +50,7 @@ the always-on spine for aeda operations. this standalone node.js + typescript se
 | `heartbeat.lilitStandup` | 07:00 europe/prague daily | morning standup summary from lilit |
 | `system.nightlyBackup` | 03:00 europe/prague daily | backup all collections to r2 |
 | `system.costRollup` | 03:30 europe/prague daily | aggregate yesterday's costs |
+| `process-inbound-email` | on-demand (webhook triggered) | process inbound email, classify, route, draft reply |
 
 ## configuration
 
@@ -122,6 +128,9 @@ db.restored_os_audit_log.renameCollection("os_audit_log", {dropTarget: true})
 | `os_cost_daily` | daily cost rollups | no (derived data) |
 | `os_founder_inbox` | notifications for founder | no |
 | `os_agenda_jobs` | agenda job state | no (managed by agenda) |
+| `os_inbox_items` | inbound emails processed | yes |
+| `os_email_drafts` | agent-generated draft replies | no (status transitions allowed) |
+| `investor_pipeline` | crm for investor tracking | no |
 
 ## development
 
@@ -150,3 +159,38 @@ all llm calls go through `modelRouter.routedCall()` which enforces budget limits
 
 - always use lowercase "aeda" (never "Aeda" or "AEDA")
 - aeda is a technology network - never describe as CASP, VASP, EMI, or payment processor
+
+## slice 2: email bridge setup
+
+### gmail api setup
+
+1. create oauth2 credentials in google cloud console
+2. enable the gmail api
+3. generate refresh token:
+```bash
+GMAIL_CLIENT_ID=xxx GMAIL_CLIENT_SECRET=yyy node scripts/get-gmail-token.js
+```
+4. add `GMAIL_REFRESH_TOKEN` to railway env vars
+5. create a label "Pending Send" in artur@aedawallet.com gmail
+
+### cloudflare email worker
+
+see `cloudflare-worker/README.md` for deployment instructions.
+
+the worker is deployed manually via cloudflare dashboard, not via CI.
+
+### webhook endpoint
+
+POST `/webhook/inbound-email` receives emails from cloudflare worker.
+
+requires `X-Webhook-Secret` header matching `WEBHOOK_SECRET` env var.
+
+### email processing flow
+
+1. cloudflare worker receives email at artur@aeda.am
+2. forwards to artur@aedawallet.com AND posts to railway webhook
+3. webhook creates inbox item and queues processing job
+4. @artur classifies email and decides routing
+5. @lilit creates task
+6. assigned agent drafts reply (if needed)
+7. draft pushed to gmail with "Pending Send" label

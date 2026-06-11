@@ -5,3 +5,6 @@ export * from './budget.js';
 export * from './memory.js';
 export * from './costDaily.js';
 export * from './founderInbox.js';
+export * from './inboxItem.js';
+export * from './emailDraft.js';
+export * from './investorPipeline.js';

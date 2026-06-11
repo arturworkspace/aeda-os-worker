@@ -1,13 +1,17 @@
 import { Agenda } from 'agenda';
+import express from 'express';
 import { env } from './config/env.js';
 import { connectDb, disconnectDb } from './db/connect.js';
 import { budgetRepo } from './db/repos/budget.repo.js';
 import { memoryRepo } from './db/repos/memory.repo.js';
 import { loadApprovalMatrix, logApprovalMatrixLoaded } from './core/stateMachine.js';
 import { defineAllJobs, scheduleAllJobs } from './jobs/index.js';
+import { registerRoutes } from './routes/index.js';
+import { initGmailClient, ensurePendingSendLabel } from './services/gmail.js';
 import { logger } from './logger.js';
 
 let agenda: Agenda | null = null;
+let httpServer: ReturnType<typeof import('http').createServer> | null = null;
 
 async function main(): Promise<void> {
   logger.info('starting aeda os worker');
@@ -71,6 +75,31 @@ async function main(): Promise<void> {
     throw err;
   }
 
+  try {
+    initGmailClient();
+    await ensurePendingSendLabel();
+    logger.info('gmail client initialized');
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.error('step failed: initGmailClient -', err.message, err.stack);
+    logger.warn({ err: err.message }, 'gmail init failed, continuing without gmail');
+  }
+
+  const app = express();
+  app.use(express.json({ limit: '10mb' }));
+
+  app.get('/health', (_req, res) => {
+    res.json({ status: 'ok', service: 'aeda-os-worker' });
+  });
+
+  registerRoutes(app, agenda);
+
+  const port = parseInt(env.PORT, 10);
+  httpServer = app.listen(port, () => {
+    console.log(`http server listening on port ${port}`);
+    logger.info({ port }, 'http server listening');
+  });
+
   agenda.on('ready', async () => {
     try {
       logger.info('agenda ready');
@@ -108,6 +137,11 @@ async function main(): Promise<void> {
 
 async function shutdown(): Promise<void> {
   logger.info('shutting down aeda os worker');
+
+  if (httpServer) {
+    httpServer.close();
+    logger.info('http server closed');
+  }
 
   if (agenda) {
     await agenda.stop();
