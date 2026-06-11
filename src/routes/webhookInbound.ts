@@ -27,6 +27,8 @@ export function createWebhookRouter(agenda: Agenda): Router {
   const router = Router();
 
   router.post('/inbound-email', async (req: Request, res: Response) => {
+    console.log('webhook received:', JSON.stringify(req.body).slice(0, 200));
+
     const webhookSecret = process.env['WEBHOOK_SECRET'];
     const providedSecret = req.headers['x-webhook-secret'];
 
@@ -64,15 +66,17 @@ export function createWebhookRouter(agenda: Agenda): Router {
     const { from, to, rawEmail, timestamp } = parseResult.data;
 
     try {
+      const rawFrom = from || '';
+      const emailMatch = rawFrom.match(/<([^>]+)>/);
+      const sender_email = emailMatch && emailMatch[1] ? emailMatch[1].trim() : rawFrom.trim();
+      const namePart = rawFrom.split('<')[0];
+      const sender_name = rawFrom.includes('<') && namePart
+        ? namePart.trim()
+        : rawFrom.trim();
+
+      console.log('parsed sender:', { sender_email, sender_name, rawFrom });
+
       const parsed = await parseRawEmail(rawEmail);
-
-      const emailMatch = from.match(/<(.+)>/);
-      const fromEmail = (emailMatch?.[1] ?? from).trim();
-      const fromNamePart = from.split('<')[0];
-      const fromName = from.includes('<') && fromNamePart ? fromNamePart.trim() : from.trim();
-
-      const senderEmail = parsed.sender_email || fromEmail;
-      const senderName = parsed.sender_name || fromName;
 
       const existing = await inboxItemRepo.findByMessageId(parsed.message_id);
       if (existing) {
@@ -83,8 +87,8 @@ export function createWebhookRouter(agenda: Agenda): Router {
 
       const inboxItem = await inboxItemRepo.create({
         recipient: to,
-        sender_email: senderEmail,
-        sender_name: senderName,
+        sender_email: sender_email,
+        sender_name: sender_name,
         subject: parsed.subject,
         body_raw: parsed.body_raw,
         received_at: new Date(timestamp),
@@ -104,7 +108,7 @@ export function createWebhookRouter(agenda: Agenda): Router {
         eventType: 'email.received',
         payload: {
           inboxItemId,
-          sender: senderEmail,
+          sender: sender_email,
           subject: parsed.subject,
         },
       });
