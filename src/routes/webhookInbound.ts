@@ -61,10 +61,18 @@ export function createWebhookRouter(agenda: Agenda): Router {
       return;
     }
 
-    const { to, rawEmail, timestamp } = parseResult.data;
+    const { from, to, rawEmail, timestamp } = parseResult.data;
 
     try {
       const parsed = await parseRawEmail(rawEmail);
+
+      const emailMatch = from.match(/<(.+)>/);
+      const fromEmail = (emailMatch?.[1] ?? from).trim();
+      const fromNamePart = from.split('<')[0];
+      const fromName = from.includes('<') && fromNamePart ? fromNamePart.trim() : from.trim();
+
+      const senderEmail = parsed.sender_email || fromEmail;
+      const senderName = parsed.sender_name || fromName;
 
       const existing = await inboxItemRepo.findByMessageId(parsed.message_id);
       if (existing) {
@@ -75,8 +83,8 @@ export function createWebhookRouter(agenda: Agenda): Router {
 
       const inboxItem = await inboxItemRepo.create({
         recipient: to,
-        sender_email: parsed.sender_email,
-        sender_name: parsed.sender_name,
+        sender_email: senderEmail,
+        sender_name: senderName,
         subject: parsed.subject,
         body_raw: parsed.body_raw,
         received_at: new Date(timestamp),
@@ -96,7 +104,7 @@ export function createWebhookRouter(agenda: Agenda): Router {
         eventType: 'email.received',
         payload: {
           inboxItemId,
-          sender: parsed.sender_email,
+          sender: senderEmail,
           subject: parsed.subject,
         },
       });
