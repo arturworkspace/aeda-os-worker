@@ -183,6 +183,8 @@ Respond with a task ID in format TASK-XXXX and a one-sentence confirmation.`,
       if (classification.draft_reply_needed && classification.classification !== 'spam') {
         const draftingAgent = getPersona(classification.routing_agent) ?? lilitPersona;
 
+        const agentName = draftingAgent.name.toUpperCase();
+
         const draftResult = await routedCall({
           tier: 'production',
           agentOrJob: classification.routing_agent,
@@ -192,7 +194,31 @@ Respond with a task ID in format TASK-XXXX and a one-sentence confirmation.`,
               role: 'user',
               content: `Draft a reply to this email. Be professional, concise, and helpful. Always use lowercase "aeda".
 
-Do not add any signature, sign-off, or closing (no "Best regards", no name, no title). End the draft with the last sentence of the body. Artur will add his own signature before sending.
+Your response body must have TWO sections:
+
+Section 1 — AGENT COMMENTARY (internal, for Artur only):
+Write your professional assessment:
+- Brief analysis of the email
+- Key points to address
+- Risks or opportunities identified
+- Your recommendation
+
+Section 2 — DRAFT REPLY (to be sent to external party):
+The actual reply email body, professional and appropriate for sending.
+
+Format the body field EXACTLY like this:
+
+═══ ${agentName} — PROFESSIONAL COMMENTARY ═══
+
+[your internal analysis here]
+
+══════════════════════════════════════════════
+
+═══ DRAFT REPLY ═══
+
+[ready-to-send reply here]
+
+IMPORTANT: Do NOT add any signature, sign-off, or closing (no "Best regards", no name, no title). End the draft reply section with the last sentence of the actual reply. Artur will add his own signature before sending.
 
 ${hardened}${crmContext}
 
@@ -201,7 +227,7 @@ Brief from Artur: ${classification.brief_for_lilit}
 Return JSON: {"subject": "Re: ...", "body": "..."}`,
             },
           ],
-          maxTokens: 800,
+          maxTokens: 1200,
         });
 
         totalCostUsd += draftResult.costUsd;
