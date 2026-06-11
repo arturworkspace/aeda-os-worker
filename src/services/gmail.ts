@@ -146,21 +146,19 @@ export async function createDraft(
 
   if (!pendingSendLabelId) {
     logger.warn({ draftId, messageId }, 'pending send label id is null, skipping label apply');
-  } else if (!draftId) {
-    logger.warn({ pendingSendLabelId }, 'draft id is null, cannot apply label');
+  } else if (!messageId) {
+    logger.warn({ draftId, pendingSendLabelId }, 'message id is null, cannot apply label');
   } else {
     logger.info(
       { draftId, messageId, pendingSendLabelId },
-      'attempting to apply pending send label to draft'
+      'attempting to apply pending send label to draft message'
     );
     try {
-      await gmailClient.users.drafts.update({
+      await gmailClient.users.messages.modify({
         userId: 'me',
-        id: draftId,
+        id: messageId,
         requestBody: {
-          message: {
-            labelIds: ['DRAFT', pendingSendLabelId],
-          },
+          addLabelIds: [pendingSendLabelId],
         },
       });
       labelApplied = true;
