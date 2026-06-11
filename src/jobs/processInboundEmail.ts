@@ -100,6 +100,8 @@ export function defineJob(agenda: Agenda): void {
 
       await inboxItemRepo.updateSanitizedBody(inboxItemId, sanitized, hardened);
 
+      logger.info({ body_preview: sanitized?.slice(0, 500) }, 'email body preview');
+
       const crmMatch = await matchSender(inboxItem.sender_email);
       await inboxItemRepo.updateCrmMatch(inboxItemId, crmMatch);
 
@@ -139,6 +141,16 @@ ${hardened}${crmContext}`,
       totalCostUsd += arturResult.costUsd;
       const arturText = getTextContent(arturResult.response);
       const classification = parseArturResponse(arturText);
+
+      logger.info(
+        {
+          routing_agent: classification.routing_agent,
+          draft_reply_needed: classification.draft_reply_needed,
+          classification: classification.classification,
+          urgency: classification.urgency,
+        },
+        'routing decision'
+      );
 
       await inboxItemRepo.updateRouting(inboxItemId, {
         artur_classification: classification.classification,
@@ -180,7 +192,13 @@ Respond with a task ID in format TASK-XXXX and a one-sentence confirmation.`,
         lilit_task_id: taskId,
       });
 
+      logger.info(
+        { draft_reply_needed: classification.draft_reply_needed, classification: classification.classification },
+        'proceeding to draft generation check'
+      );
+
       if (classification.draft_reply_needed && classification.classification !== 'spam') {
+        logger.info({ draft_reply_needed: true }, 'proceeding to draft generation');
         const draftingAgent = getPersona(classification.routing_agent) ?? lilitPersona;
 
         const agentName = draftingAgent.name.toUpperCase();
