@@ -104,14 +104,40 @@ export function createWebhookRouter(agenda: Agenda): Router {
       res.status(200).json({ status: 'queued', inbox_item_id: inboxItemId });
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
-      logger.error({ error: errMsg }, 'webhook processing error');
+      const errStack = error instanceof Error ? error.stack : undefined;
+      const errName = error instanceof Error ? error.name : 'UnknownError';
+
+      console.error('webhook processing error:', errMsg);
+      console.error('stack:', errStack);
+
+      logger.error(
+        {
+          error: errMsg,
+          errorName: errName,
+          stack: errStack,
+          body: req.body ? {
+            from: req.body.from,
+            to: req.body.to,
+            hasRawEmail: !!req.body.rawEmail,
+            rawEmailLength: req.body.rawEmail?.length,
+            timestamp: req.body.timestamp
+          } : 'no body'
+        },
+        'webhook processing error'
+      );
+
       await writeAuditEvent({
         actor: 'system',
         actorType: 'system',
         eventType: 'webhook.error',
-        payload: { error: errMsg },
+        payload: {
+          error: errMsg,
+          errorName: errName,
+          stack: errStack,
+        },
       });
-      res.status(500).json({ error: 'processing failed' });
+
+      res.status(500).json({ error: 'processing failed', message: errMsg });
     }
   });
 
