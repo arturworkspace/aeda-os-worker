@@ -94,10 +94,21 @@ async function main(): Promise<void> {
 
   registerRoutes(app, agenda);
 
-  const port = parseInt(env.PORT, 10);
-  httpServer = app.listen(port, () => {
+  const port = parseInt(process.env['PORT'] ?? '3000', 10);
+  console.log(`starting http server on port ${port}...`);
+  logger.info({ port }, 'starting http server');
+
+  httpServer = app.listen(port);
+
+  httpServer.on('listening', () => {
     console.log(`http server listening on port ${port}`);
     logger.info({ port }, 'http server listening');
+  });
+
+  httpServer.on('error', (err) => {
+    console.error('http server error:', err);
+    logger.fatal({ err: err.message }, 'http server failed to start');
+    process.exit(1);
   });
 
   agenda.on('ready', async () => {
