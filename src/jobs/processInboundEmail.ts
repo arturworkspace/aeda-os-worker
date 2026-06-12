@@ -172,8 +172,8 @@ ${enrichedContext}${crmContext}`,
       const arturText = getTextContent(arturResult.response);
       const classification = parseArturResponse(arturText);
 
-      const draftNeeded = true;
-      console.log('draft override: draftNeeded forced to true');
+      const ALWAYS_DRAFT = true;
+      console.log('ALWAYS_DRAFT override: draft generation is ALWAYS enabled');
 
       const finalRoutingAgent = explicitlyRoutedAgent ?? classification.routing_agent;
       console.log('routing override:', { explicitlyRoutedAgent, arturAgent: classification.routing_agent, finalRoutingAgent });
@@ -181,7 +181,7 @@ ${enrichedContext}${crmContext}`,
       console.log(
         'routing decision: agent=%s draft=%s classification=%s urgency=%s mention=%s',
         finalRoutingAgent,
-        draftNeeded,
+        ALWAYS_DRAFT,
         classification.classification,
         classification.urgency,
         explicitlyRoutedAgent
@@ -189,7 +189,7 @@ ${enrichedContext}${crmContext}`,
       logger.info(
         {
           routing_agent: finalRoutingAgent,
-          draft_reply_needed: draftNeeded,
+          draft_reply_needed: ALWAYS_DRAFT,
           classification: classification.classification,
           urgency: classification.urgency,
           mention_found: explicitlyRoutedAgent,
@@ -238,13 +238,13 @@ Respond with a task ID in format TASK-XXXX and a one-sentence confirmation.`,
       });
 
       logger.info(
-        { draft_reply_needed: draftNeeded, classification: classification.classification },
+        { draft_reply_needed: ALWAYS_DRAFT, classification: classification.classification },
         'proceeding to draft generation check'
       );
 
-      if (draftNeeded) {
+      if (ALWAYS_DRAFT) {
         console.log('entering draft generation block, agent:', finalRoutingAgent);
-        logger.info({ draft_reply_needed: draftNeeded }, 'proceeding to draft generation');
+        logger.info({ draft_reply_needed: ALWAYS_DRAFT }, 'proceeding to draft generation');
         const draftingAgent = getPersona(finalRoutingAgent) ?? lilitPersona;
 
         const agentName = draftingAgent.name.toUpperCase();
