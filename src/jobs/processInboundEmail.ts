@@ -148,6 +148,37 @@ export function defineJob(agenda: Agenda): void {
       const crmMatch = await matchSender(inboxItem.sender_email);
       await inboxItemRepo.updateCrmMatch(inboxItemId, crmMatch);
 
+      const senderEmail = inboxItem.sender_email.toLowerCase();
+      const isTrustedDomain = senderEmail.endsWith('@aedawallet.com');
+      const isTrustedEmail = senderEmail === 'kartshikyan@gmail.com';
+      const isCrmMatch = crmMatch.matched;
+      const isTrustedSender = isTrustedDomain || isTrustedEmail || isCrmMatch;
+
+      console.log('trusted sender check:', { senderEmail, isTrustedDomain, isTrustedEmail, isCrmMatch, isTrustedSender });
+
+      if (!isTrustedSender) {
+        logger.warn(
+          { senderEmail },
+          'unknown sender — skipping agent processing'
+        );
+        console.log('unknown sender — skipping agent processing:', senderEmail);
+
+        await writeAuditEvent({
+          actor: 'system',
+          actorType: 'system',
+          eventType: 'email_processed',
+          payload: {
+            inbox_item_id: inboxItemId,
+            skipped: true,
+            reason: 'untrusted_sender',
+            sender_email: senderEmail,
+          },
+        });
+
+        await inboxItemRepo.updateStatus(inboxItemId, 'draft_created');
+        return;
+      }
+
       await inboxItemRepo.updateStatus(inboxItemId, 'processing');
 
       const monthToDateEmailCost = await costLedgerRepo.getMonthToDateTotal();
