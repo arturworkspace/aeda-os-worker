@@ -2,6 +2,7 @@ import { Agenda, Job } from 'agenda';
 import { Types } from 'mongoose';
 import { inboxItemRepo } from '../db/repos/inboxItem.repo.js';
 import { emailDraftRepo } from '../db/repos/emailDraft.repo.js';
+import { costLedgerRepo } from '../db/repos/costLedger.repo.js';
 import { sanitizeBody, hardenBody, parseRawEmail } from '../services/emailParser.js';
 import { parseAttachments } from '../services/attachmentParser.js';
 import { readLinks } from '../services/linkReader.js';
@@ -11,6 +12,8 @@ import { routedCall, getTextContent } from '../core/modelRouter.js';
 import { writeAuditEvent } from '../core/auditLog.js';
 import { getPersona } from '../agents/personas.js';
 import { logger } from '../logger.js';
+
+const MONTHLY_EMAIL_BUDGET_USD = 20;
 
 export const JOB_NAME = 'process-inbound-email';
 
@@ -136,6 +139,58 @@ export function defineJob(agenda: Agenda): void {
       await inboxItemRepo.updateCrmMatch(inboxItemId, crmMatch);
 
       await inboxItemRepo.updateStatus(inboxItemId, 'processing');
+
+      const monthToDateEmailCost = await costLedgerRepo.getMonthToDateTotal();
+      if (monthToDateEmailCost >= MONTHLY_EMAIL_BUDGET_USD) {
+        logger.warn(
+          { monthToDateEmailCost, budget: MONTHLY_EMAIL_BUDGET_USD },
+          'monthly email budget exceeded'
+        );
+        console.log('monthly email budget exceeded:', monthToDateEmailCost, '>=', MONTHLY_EMAIL_BUDGET_USD);
+
+        await writeAuditEvent({
+          actor: 'system',
+          actorType: 'system',
+          eventType: 'email_processed',
+          payload: {
+            inbox_item_id: inboxItemId,
+            skipped: true,
+            reason: 'monthly_budget_exceeded',
+            cost_usd: monthToDateEmailCost,
+          },
+        });
+
+        const budgetDraft = await emailDraftRepo.create({
+          inbox_item_id: new Types.ObjectId(inboxItemId),
+          drafted_by_agent: 'system',
+          to: inboxItem.sender_email,
+          subject: `Re: ${inboxItem.subject}`,
+          body: '[Auto-reply paused — monthly processing budget reached. Artur will respond manually.]',
+          thread_context: 'budget exceeded',
+        });
+
+        if (isGmailConfigured()) {
+          try {
+            const gmailResult = await createDraft(
+              inboxItem.sender_email,
+              `Re: ${inboxItem.subject}`,
+              '[Auto-reply paused — monthly processing budget reached. Artur will respond manually.]',
+              inboxItem.message_id
+            );
+            await emailDraftRepo.updateGmailInfo(
+              budgetDraft._id as Types.ObjectId,
+              gmailResult.draftId,
+              gmailResult.messageId
+            );
+          } catch (gmailError) {
+            logger.error({ error: gmailError }, 'failed to create budget exceeded draft in gmail');
+          }
+        }
+
+        await inboxItemRepo.setDraftId(inboxItemId, budgetDraft._id as Types.ObjectId);
+        await inboxItemRepo.updateStatus(inboxItemId, 'draft_created');
+        return;
+      }
 
       const arturPersona = getPersona('artur');
       if (!arturPersona) {
