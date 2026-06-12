@@ -242,7 +242,8 @@ Respond with a task ID in format TASK-XXXX and a one-sentence confirmation.`,
         'proceeding to draft generation check'
       );
 
-      if (draftNeeded && classification.classification !== 'spam') {
+      if (draftNeeded) {
+        console.log('entering draft generation block, agent:', finalRoutingAgent);
         logger.info({ draft_reply_needed: draftNeeded }, 'proceeding to draft generation');
         const draftingAgent = getPersona(finalRoutingAgent) ?? lilitPersona;
 
