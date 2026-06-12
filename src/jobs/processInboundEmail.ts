@@ -131,9 +131,19 @@ export function defineJob(agenda: Agenda): void {
       const linkContent = await readLinks(sanitized);
       console.log('links read:', linkContent ? 'yes' : 'none');
 
-      const enrichedContext = [hardened, attachmentContent, linkContent]
+      const MAX_CONTEXT_CHARS = 8000;
+      let enrichedContext = [hardened, attachmentContent, linkContent]
         .filter(Boolean)
         .join('\n\n');
+
+      if (enrichedContext.length > MAX_CONTEXT_CHARS) {
+        logger.warn(
+          { originalLength: enrichedContext.length, truncatedTo: MAX_CONTEXT_CHARS },
+          'email context truncated'
+        );
+        console.log('email context truncated from', enrichedContext.length, 'to', MAX_CONTEXT_CHARS, 'chars');
+        enrichedContext = enrichedContext.slice(0, MAX_CONTEXT_CHARS) + '\n[... content truncated]';
+      }
 
       const crmMatch = await matchSender(inboxItem.sender_email);
       await inboxItemRepo.updateCrmMatch(inboxItemId, crmMatch);
