@@ -67,6 +67,8 @@ export async function parseAttachments(
   body?: string
 ): Promise<string> {
   if (!attachments || attachments.length === 0) {
+    console.log('no attachments found or attachments exceeded 200KB cap');
+    logger.info('no attachments found or attachments exceeded 200KB cap');
     if (subject && body && mayContainAttachments(subject, body)) {
       logger.warn(
         'email may contain attachments that exceeded the 200KB raw email cap and could not be extracted'
