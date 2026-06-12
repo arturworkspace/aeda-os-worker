@@ -1,4 +1,4 @@
-import { simpleParser, ParsedMail, AddressObject } from 'mailparser';
+import { simpleParser, ParsedMail, AddressObject, Attachment } from 'mailparser';
 import { logger } from '../logger.js';
 
 export interface ParsedEmail {
@@ -10,6 +10,7 @@ export interface ParsedEmail {
   message_id: string;
   in_reply_to: string | null;
   date: Date;
+  attachments: Attachment[];
 }
 
 function extractEmailAddress(addr: AddressObject | AddressObject[] | undefined): string {
@@ -53,6 +54,7 @@ export async function parseRawEmail(rawBase64: string): Promise<ParsedEmail> {
     message_id: parsed.messageId ?? `generated-${Date.now()}`,
     in_reply_to: parsed.inReplyTo ?? null,
     date: parsed.date ?? new Date(),
+    attachments: parsed.attachments ?? [],
   };
 }
 

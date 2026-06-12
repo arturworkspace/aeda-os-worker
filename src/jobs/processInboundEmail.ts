@@ -2,7 +2,9 @@ import { Agenda, Job } from 'agenda';
 import { Types } from 'mongoose';
 import { inboxItemRepo } from '../db/repos/inboxItem.repo.js';
 import { emailDraftRepo } from '../db/repos/emailDraft.repo.js';
-import { sanitizeBody, hardenBody } from '../services/emailParser.js';
+import { sanitizeBody, hardenBody, parseRawEmail } from '../services/emailParser.js';
+import { parseAttachments } from '../services/attachmentParser.js';
+import { readLinks } from '../services/linkReader.js';
 import { matchSender } from '../services/crmMatcher.js';
 import { createDraft, isGmailConfigured } from '../services/gmail.js';
 import { routedCall, getTextContent } from '../core/modelRouter.js';
@@ -72,11 +74,16 @@ function parseDraftResponse(text: string): DraftResponse {
 
 export function defineJob(agenda: Agenda): void {
   agenda.define(JOB_NAME, async (job: Job) => {
-    const data = job.attrs.data as { inbox_item_id?: string; explicitly_routed_agent?: string } | undefined;
+    const data = job.attrs.data as {
+      inbox_item_id?: string;
+      explicitly_routed_agent?: string;
+      raw_email_base64?: string;
+    } | undefined;
     const inboxItemId = data?.inbox_item_id;
     const explicitlyRoutedAgent = data?.explicitly_routed_agent ?? null;
+    const rawEmailBase64 = data?.raw_email_base64 ?? null;
 
-    console.log('job data:', { inboxItemId, explicitlyRoutedAgent });
+    console.log('job data:', { inboxItemId, explicitlyRoutedAgent, hasRawEmail: !!rawEmailBase64 });
 
     if (!inboxItemId) {
       logger.error('process-inbound-email job missing inbox_item_id');
@@ -104,6 +111,20 @@ export function defineJob(agenda: Agenda): void {
       await inboxItemRepo.updateSanitizedBody(inboxItemId, sanitized, hardened);
 
       logger.info({ body_preview: sanitized?.slice(0, 500) }, 'email body preview');
+
+      let attachmentContent = '';
+      if (rawEmailBase64) {
+        const parsedEmail = await parseRawEmail(rawEmailBase64);
+        attachmentContent = await parseAttachments(parsedEmail.attachments);
+        console.log('attachments processed:', parsedEmail.attachments.length);
+      }
+
+      const linkContent = await readLinks(sanitized);
+      console.log('links read:', linkContent ? 'yes' : 'none');
+
+      const enrichedContext = [hardened, attachmentContent, linkContent]
+        .filter(Boolean)
+        .join('\n\n');
 
       const crmMatch = await matchSender(inboxItem.sender_email);
       await inboxItemRepo.updateCrmMatch(inboxItemId, crmMatch);
@@ -135,7 +156,7 @@ export function defineJob(agenda: Agenda): void {
   "draft_reply_needed": true|false
 }
 
-${hardened}${crmContext}`,
+${enrichedContext}${crmContext}`,
           },
         ],
         maxTokens: 300,
@@ -256,7 +277,7 @@ Format the body field EXACTLY like this:
 
 IMPORTANT: Do NOT add any signature, sign-off, or closing (no "Best regards", no name, no title). End the draft reply section with the last sentence of the actual reply. Artur will add his own signature before sending.
 
-${hardened}${crmContext}
+${enrichedContext}${crmContext}
 
 Brief from Artur: ${classification.brief_for_lilit}
 

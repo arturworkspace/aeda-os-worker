@@ -110,6 +110,7 @@ export function createWebhookRouter(agenda: Agenda): Router {
       await agenda.now('process-inbound-email', {
         inbox_item_id: inboxItemId,
         explicitly_routed_agent: explicitly_routed_agent,
+        raw_email_base64: rawEmail,
       });
 
       logger.info({ inboxItemId, messageId: parsed.message_id }, 'inbound email queued for processing');
