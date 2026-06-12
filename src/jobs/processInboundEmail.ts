@@ -13,7 +13,7 @@ import { writeAuditEvent } from '../core/auditLog.js';
 import { getPersona } from '../agents/personas.js';
 import { logger } from '../logger.js';
 
-const MONTHLY_EMAIL_BUDGET_USD = 20;
+const MONTHLY_EMAIL_BUDGET_USD = 5;
 
 export const JOB_NAME = 'process-inbound-email';
 
@@ -185,7 +185,7 @@ export function defineJob(agenda: Agenda): void {
       if (monthToDateEmailCost >= MONTHLY_EMAIL_BUDGET_USD) {
         logger.warn(
           { monthToDateEmailCost, budget: MONTHLY_EMAIL_BUDGET_USD },
-          'monthly email budget exceeded'
+          'monthly email budget exceeded ($5 cap)'
         );
         console.log('monthly email budget exceeded:', monthToDateEmailCost, '>=', MONTHLY_EMAIL_BUDGET_USD);
 
