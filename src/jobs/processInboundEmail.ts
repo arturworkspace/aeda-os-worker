@@ -155,12 +155,21 @@ export function defineJob(agenda: Agenda): void {
             role: 'user',
             content: `Classify this email and decide routing. Return ONLY valid JSON with these exact fields:
 {
-  "classification": "investor_follow_up|legal_doc|partner|unknown|spam",
+  "classification": "investor_follow_up|legal_doc|partner|financial|technical|marketing|operations|unknown|spam",
   "urgency": "high|medium|low",
-  "routing_agent": "arshak|narek|alex|tatev|chris|lilit",
+  "routing_agent": "artur|arshak|narek|hamazasp|tatev|alex|lilit",
   "brief_for_lilit": "one sentence: who sent this, what they want, what agent should do",
   "draft_reply_needed": true|false
 }
+
+ROUTING RULES:
+- artur: investor emails, fundraising, VC follow-ups, term sheets, commercial proposals, new partnerships, collaboration offers
+- arshak: invoices, financial statements, accounting, burn rate questions
+- narek: legal documents, contracts, compliance, regulatory
+- hamazasp: technical/API/infrastructure proposals
+- tatev: marketing, events, brand, communications
+- alex: general operations, support, anything else
+- lilit: if truly unclear who should handle
 
 ${enrichedContext}${crmContext}`,
           },
