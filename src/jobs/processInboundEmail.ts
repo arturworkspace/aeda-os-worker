@@ -249,10 +249,12 @@ Respond with a task ID in format TASK-XXXX and a one-sentence confirmation.`,
 
         const agentName = draftingAgent.name.toUpperCase();
 
+        const ghostwriterInstruction = `You are ghostwriting this email reply AS Artur Kartshikyan, CEO of aeda. Write entirely in first person using 'I', 'my', 'we' (for aeda). Never refer to 'Artur' in third person. Never mention your own agent name or role. You are Artur writing this email — not commenting on what Artur said.`;
+
         const draftResult = await routedCall({
           tier: 'production',
           agentOrJob: finalRoutingAgent,
-          system: draftingAgent.systemPrompt + `\n\nYou are drafting a reply email. Return JSON with "subject" and "body" fields.`,
+          system: ghostwriterInstruction + `\n\n` + draftingAgent.systemPrompt + `\n\nYou are drafting a reply email. Return JSON with "subject" and "body" fields.`,
           messages: [
             {
               role: 'user',
