@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { Agenda } from 'agenda';
 import { timingSafeEqual } from 'crypto';
 import { z } from 'zod';
+import rateLimit from 'express-rate-limit';
 import { inboxItemRepo } from '../db/repos/inboxItem.repo.js';
 import { parseRawEmail } from '../services/emailParser.js';
 import { writeAuditEvent } from '../core/auditLog.js';
@@ -26,7 +27,25 @@ function safeCompare(a: string, b: string): boolean {
 export function createWebhookRouter(agenda: Agenda): Router {
   const router = Router();
 
-  router.post('/inbound-email', async (req: Request, res: Response) => {
+  const webhookRateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: async (req, res) => {
+      const ip = req.ip ?? 'unknown';
+      logger.warn({ ip }, 'webhook rate limit exceeded');
+      await writeAuditEvent({
+        actor: 'system',
+        actorType: 'system',
+        eventType: 'webhook.error',
+        payload: { error: 'rate_limit_exceeded', ip },
+      });
+      res.status(429).json({ error: 'too many requests' });
+    },
+  });
+
+  router.post('/inbound-email', webhookRateLimiter, async (req: Request, res: Response) => {
     console.log('webhook received:', JSON.stringify(req.body).slice(0, 200));
 
     const webhookSecret = process.env['WEBHOOK_SECRET'];

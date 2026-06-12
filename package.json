@@ -20,6 +20,7 @@
     "agenda": "^5.0.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.5.2",
     "googleapis": "^173.0.0",
     "mailparser": "^3.9.9",
     "mammoth": "^1.12.0",
