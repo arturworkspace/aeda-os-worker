@@ -43,8 +43,36 @@ function extractPlainText(buffer: Buffer): string {
   return buffer.toString('utf-8');
 }
 
-export async function parseAttachments(attachments: Attachment[]): Promise<string> {
+const ATTACHMENT_INDICATORS = [
+  'attachment',
+  'attached',
+  'enclosed',
+  'please find',
+  'see attached',
+  'document attached',
+  '.pdf',
+  '.docx',
+  '.xlsx',
+  '.pptx',
+];
+
+function mayContainAttachments(subject: string, body: string): boolean {
+  const combined = `${subject} ${body}`.toLowerCase();
+  return ATTACHMENT_INDICATORS.some((indicator) => combined.includes(indicator));
+}
+
+export async function parseAttachments(
+  attachments: Attachment[],
+  subject?: string,
+  body?: string
+): Promise<string> {
   if (!attachments || attachments.length === 0) {
+    if (subject && body && mayContainAttachments(subject, body)) {
+      logger.warn(
+        'email may contain attachments that exceeded the 200KB raw email cap and could not be extracted'
+      );
+      console.log('WARNING: attachments may have been truncated by 200KB email cap');
+    }
     return '';
   }
 

@@ -77,9 +77,13 @@ export function createWebhookRouter(agenda: Agenda): Router {
       console.log('parsed sender:', { sender_email, sender_name, rawFrom });
 
       const rawText = Buffer.from(rawEmail, 'base64').toString('utf-8');
+      const decodedText = rawText
+        .replace(/=([0-9A-F]{2})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+        .replace(/=\r?\n/g, '');
       console.log('raw text first 300 chars:', rawText.slice(0, 300));
+      console.log('decoded text first 300 chars:', decodedText.slice(0, 300));
 
-      const mentionMatch = rawText.match(/@(arshak|narek|alex|tatev|hamazasp|chris|laura|anna|vagho|mike|ruzan|sofi|lilit)/i);
+      const mentionMatch = decodedText.match(/@(arshak|narek|alex|tatev|hamazasp|chris|laura|anna|vagho|mike|ruzan|sofi|lilit)/i);
       const explicitly_routed_agent = mentionMatch && mentionMatch[1] ? mentionMatch[1].toLowerCase() : null;
       console.log('mention detection:', { mentionMatch: mentionMatch?.[0], explicitly_routed_agent });
 

@@ -115,8 +115,14 @@ export function defineJob(agenda: Agenda): void {
       let attachmentContent = '';
       if (rawEmailBase64) {
         const parsedEmail = await parseRawEmail(rawEmailBase64);
-        attachmentContent = await parseAttachments(parsedEmail.attachments);
+        attachmentContent = await parseAttachments(
+          parsedEmail.attachments,
+          inboxItem.subject,
+          sanitized
+        );
         console.log('attachments processed:', parsedEmail.attachments.length);
+      } else {
+        attachmentContent = await parseAttachments([], inboxItem.subject, sanitized);
       }
 
       const linkContent = await readLinks(sanitized);
