@@ -172,74 +172,103 @@ async function runResearchCall(prompt: string): Promise<{
   weekSummaryLine: string;
 }> {
   try {
-    const response = await client.messages.create({
+    // Step 1: Research with web search — free-form response
+    const researchResponse = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1000,
-      system: RESEARCH_SYSTEM,
-      tools: [{ type: 'web_search_20250305' as const, name: 'web_search' as const, max_uses: 5 }],
+      max_tokens: 1500,
+      system: `You are @hasmik, Research & Intelligence Agent at aeda.
+aeda is a non-custodial EURC stablecoin wallet (EU-Armenia corridor, Prague).
+Research the topic and provide a detailed factual summary of the most recent developments.
+Write in plain prose. Include specific facts, dates, numbers where available.
+Focus only on what is genuinely new or changed recently.`,
+      tools: [{ type: 'web_search_20250305' as const, name: 'web_search' as const, max_uses: 3 }],
       messages: [{ role: 'user', content: prompt }],
     });
 
-    const text = response.content
+    const researchText = researchResponse.content
       .filter((b) => b.type === 'text')
       .map((b) => (b as { type: 'text'; text: string }).text)
       .join('\n')
       .trim();
 
-    if (!text) return { signals: [], weekSummaryLine: 'No updates this week.' };
-
-    // Extract JSON from response - handle markdown fences and surrounding text
-    let jsonStr = text;
-
-    // Step 1: Strip markdown code fences first
-    if (text.includes('```')) {
-      // Remove everything before ```json and after closing ```
-      jsonStr = text
-        .replace(/^[\s\S]*?```(?:json)?\s*/i, '')
-        .replace(/\s*```[\s\S]*$/i, '')
-        .trim();
+    if (!researchText || researchText.length < 50) {
+      return { signals: [], weekSummaryLine: 'No significant updates this week.' };
     }
 
-    // Step 2: If still not valid JSON, try to find the JSON object
-    if (!jsonStr.startsWith('{')) {
-      const startIdx = jsonStr.indexOf('{');
-      if (startIdx !== -1) {
-        jsonStr = jsonStr.slice(startIdx);
+    // Step 2: Structure into JSON — no web search, pure formatting
+    const structureResponse = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 800,
+      system: `Convert research findings into structured JSON signals for aeda's knowledge base.
+Output ONLY valid JSON, no markdown fences, no explanation.
+
+Known facts (for contradiction checking):
+- Wise exited Armenia corridor 2024, has not returned
+- aeda is a technology network, NOT a CASP/VASP/EMI
+- MiCA entered into force January 2024
+
+trustLevel rules:
+- "verified": official .gov/.eu sources only
+- "informational": Reuters, Bloomberg, official company blogs
+- "signal": everything else, unverified claims
+
+Required JSON format:
+{
+  "signals": [
+    {
+      "title": "max 80 chars",
+      "summary": "what agents should know, max 150 words, factual",
+      "trustLevel": "verified" | "informational" | "signal",
+      "confidence": "High" | "Medium" | "Low",
+      "verificationStatus": "confirmed" | "unverifiable" | "signal",
+      "sourceUrl": "url or empty string",
+      "sourceLabel": "source name"
+    }
+  ],
+  "weekSummaryLine": "1 sentence summary of this domain this week"
+}
+
+Rules:
+- Maximum 3 signals
+- Only include genuinely material developments
+- If nothing significant: return { "signals": [], "weekSummaryLine": "No material updates this week." }
+- Never hallucinate specific dates or numbers not in the research`,
+      messages: [
+        {
+          role: 'user',
+          content: `Convert these research findings into JSON signals:\n\n${researchText}`,
+        },
+      ],
+    });
+
+    const raw =
+      structureResponse.content[0]?.type === 'text'
+        ? structureResponse.content[0].text.trim()
+        : '';
+
+    if (!raw) return { signals: [], weekSummaryLine: 'No updates this week.' };
+
+    // Extract JSON using brace matching
+    const start = raw.indexOf('{');
+    if (start === -1) return { signals: [], weekSummaryLine: 'Parse failed.' };
+
+    let depth = 0;
+    let end = -1;
+    for (let i = start; i < raw.length; i++) {
+      if (raw[i] === '{') depth++;
+      else if (raw[i] === '}') {
+        depth--;
+        if (depth === 0) { end = i; break; }
       }
     }
 
-    // Step 3: Find matching closing brace
-    if (jsonStr.startsWith('{')) {
-      let depth = 0;
-      let endIdx = 0;
-      for (let i = 0; i < jsonStr.length; i++) {
-        if (jsonStr[i] === '{') depth++;
-        else if (jsonStr[i] === '}') {
-          depth--;
-          if (depth === 0) {
-            endIdx = i + 1;
-            break;
-          }
-        }
-      }
-      if (endIdx > 0) {
-        jsonStr = jsonStr.slice(0, endIdx);
-      }
-    }
+    if (end === -1) return { signals: [], weekSummaryLine: 'Parse failed.' };
 
-    try {
-      const parsed = JSON.parse(jsonStr);
-      logger.info({ signalsFound: parsed.signals?.length ?? 0 }, '[hasmik] parsed research response');
-      return parsed;
-    } catch (parseErr) {
-      const errMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
-      logger.warn({
-        parseError: errMsg,
-        originalText: text.slice(0, 300),
-        extractedJson: jsonStr.slice(0, 300),
-      }, '[hasmik] failed to parse research JSON');
-      return { signals: [], weekSummaryLine: 'Research parsing failed.' };
-    }
+    const parsed = JSON.parse(raw.slice(start, end + 1));
+    return {
+      signals: Array.isArray(parsed.signals) ? parsed.signals : [],
+      weekSummaryLine: parsed.weekSummaryLine || 'Updates processed.',
+    };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.error({ err: msg }, '[hasmik] research call failed');
@@ -337,7 +366,7 @@ export function defineJob(agenda: Agenda): void {
       );
 
       // Rate limit protection between calls
-      await sleep(2000);
+      await sleep(3000);
     }
 
     // ── PHASE 2: Professional updates (12 agents) ────────────────────────────
@@ -378,7 +407,7 @@ export function defineJob(agenda: Agenda): void {
         '[hasmik] professional domain complete'
       );
 
-      await sleep(2000);
+      await sleep(3000);
     }
 
     // ── Write master brief to Artur's inbox ──────────────────────────────────
