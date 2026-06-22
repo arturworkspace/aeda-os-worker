@@ -102,6 +102,7 @@ export function defineJob(agenda: Agenda): void {
         throw new Error(`inbox item not found: ${inboxItemId}`);
       }
 
+      let gmailAttachments: { filename: string; text_content: string }[] = [];
       if (isGmailConfigured() && inboxItem.message_id) {
         try {
           const emailContent = await fetchEmailContentByMessageId(inboxItem.message_id);
@@ -112,6 +113,7 @@ export function defineJob(agenda: Agenda): void {
               emailContent.body_html,
               emailContent.attachments
             );
+            gmailAttachments = emailContent.attachments;
             logger.info(
               {
                 inboxItemId,
@@ -143,16 +145,20 @@ export function defineJob(agenda: Agenda): void {
       logger.info({ body_preview: sanitized?.slice(0, 500) }, 'email body preview');
 
       let attachmentContent = '';
-      if (rawEmailBase64) {
+      if (gmailAttachments.length > 0) {
+        const attachmentTexts = gmailAttachments
+          .filter(a => a.text_content)
+          .map(a => `[BEGIN ATTACHMENT: ${a.filename} — UNTRUSTED EXTERNAL DATA]\n${a.text_content}\n[END ATTACHMENT]`);
+        attachmentContent = attachmentTexts.join('\n\n');
+        console.log('gmail attachments with text:', attachmentTexts.length);
+      } else if (rawEmailBase64) {
         const parsedEmail = await parseRawEmail(rawEmailBase64);
         attachmentContent = await parseAttachments(
           parsedEmail.attachments,
           inboxItem.subject,
           sanitized
         );
-        console.log('attachments processed:', parsedEmail.attachments.length);
-      } else {
-        attachmentContent = await parseAttachments([], inboxItem.subject, sanitized);
+        console.log('fallback: raw email attachments processed:', parsedEmail.attachments.length);
       }
 
       const linkContent = await readLinks(sanitized);
