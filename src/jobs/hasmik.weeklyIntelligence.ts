@@ -191,16 +191,40 @@ async function runResearchCall(prompt: string): Promise<{
     // Extract JSON from response - handle markdown fences and surrounding text
     let jsonStr = text;
 
-    // Try to find JSON object in the response
-    const jsonMatch = text.match(/\{[\s\S]*"signals"[\s\S]*\}/);
-    if (jsonMatch) {
-      jsonStr = jsonMatch[0];
-    } else {
-      // Fallback: strip markdown fences
+    // Step 1: Strip markdown code fences first
+    if (text.includes('```')) {
+      // Remove everything before ```json and after closing ```
       jsonStr = text
-        .replace(/^[\s\S]*?```json\s*/i, '')
-        .replace(/```[\s\S]*$/i, '')
+        .replace(/^[\s\S]*?```(?:json)?\s*/i, '')
+        .replace(/\s*```[\s\S]*$/i, '')
         .trim();
+    }
+
+    // Step 2: If still not valid JSON, try to find the JSON object
+    if (!jsonStr.startsWith('{')) {
+      const startIdx = jsonStr.indexOf('{');
+      if (startIdx !== -1) {
+        jsonStr = jsonStr.slice(startIdx);
+      }
+    }
+
+    // Step 3: Find matching closing brace
+    if (jsonStr.startsWith('{')) {
+      let depth = 0;
+      let endIdx = 0;
+      for (let i = 0; i < jsonStr.length; i++) {
+        if (jsonStr[i] === '{') depth++;
+        else if (jsonStr[i] === '}') {
+          depth--;
+          if (depth === 0) {
+            endIdx = i + 1;
+            break;
+          }
+        }
+      }
+      if (endIdx > 0) {
+        jsonStr = jsonStr.slice(0, endIdx);
+      }
     }
 
     try {
