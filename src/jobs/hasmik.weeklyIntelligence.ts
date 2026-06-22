@@ -228,9 +228,16 @@ async function runResearchCall(prompt: string): Promise<{
     }
 
     try {
-      return JSON.parse(jsonStr);
-    } catch {
-      logger.warn({ text: text.slice(0, 200) }, '[hasmik] failed to parse research JSON');
+      const parsed = JSON.parse(jsonStr);
+      logger.info({ signalsFound: parsed.signals?.length ?? 0 }, '[hasmik] parsed research response');
+      return parsed;
+    } catch (parseErr) {
+      const errMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+      logger.warn({
+        parseError: errMsg,
+        originalText: text.slice(0, 300),
+        extractedJson: jsonStr.slice(0, 300),
+      }, '[hasmik] failed to parse research JSON');
       return { signals: [], weekSummaryLine: 'Research parsing failed.' };
     }
   } catch (err) {
