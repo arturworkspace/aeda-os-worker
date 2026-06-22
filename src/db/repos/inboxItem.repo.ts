@@ -126,4 +126,16 @@ export const inboxItemRepo = {
     }
     return InboxItem.findByIdAndUpdate(id, update, { new: true }).exec();
   },
+
+  async updateDraftContent(
+    id: Types.ObjectId | string,
+    agentCommentary: string,
+    draftText: string
+  ): Promise<IInboxItemDocument | null> {
+    return InboxItem.findByIdAndUpdate(
+      id,
+      { agent_commentary: agentCommentary, draft_text: draftText },
+      { new: true }
+    ).exec();
+  },
 };

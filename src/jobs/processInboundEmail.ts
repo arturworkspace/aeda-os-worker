@@ -102,7 +102,7 @@ export function defineJob(agenda: Agenda): void {
         throw new Error(`inbox item not found: ${inboxItemId}`);
       }
 
-      let gmailAttachments: { filename: string; text_content: string }[] = [];
+      let gmailAttachments: { filename: string; mimeType: string; text_content: string }[] = [];
       if (isGmailConfigured() && inboxItem.message_id) {
         try {
           const emailContent = await fetchEmailContentByMessageId(inboxItem.message_id);
@@ -144,13 +144,30 @@ export function defineJob(agenda: Agenda): void {
 
       logger.info({ body_preview: sanitized?.slice(0, 500) }, 'email body preview');
 
+      const linkContent = await readLinks(sanitized);
+      console.log('links read:', linkContent ? 'yes' : 'none');
+
+      const MAX_CONTEXT_CHARS = 8000;
+      const EMAIL_BODY_LIMIT = 3500;
+      const ATTACHMENT_LIMIT = 4000;
+
+      let truncatedBody = hardened;
+      if (truncatedBody.length > EMAIL_BODY_LIMIT) {
+        truncatedBody = truncatedBody.slice(0, EMAIL_BODY_LIMIT) + ' ...[body truncated]';
+      }
+
       let attachmentContent = '';
-      if (gmailAttachments.length > 0) {
-        const attachmentTexts = gmailAttachments
-          .filter(a => a.text_content)
-          .map(a => `[BEGIN ATTACHMENT: ${a.filename} — UNTRUSTED EXTERNAL DATA]\n${a.text_content}\n[END ATTACHMENT]`);
+      const attachmentsWithText = gmailAttachments.filter(a => a.text_content);
+      if (attachmentsWithText.length > 0) {
+        const perAttachmentLimit = Math.floor(ATTACHMENT_LIMIT / attachmentsWithText.length);
+        const attachmentTexts = attachmentsWithText.map(a => {
+          const truncatedContent = a.text_content.length > perAttachmentLimit
+            ? a.text_content.slice(0, perAttachmentLimit) + ' ...[truncated]'
+            : a.text_content;
+          return `--- ATTACHMENT: ${a.filename} (${a.mimeType}) ---\n${truncatedContent}`;
+        });
         attachmentContent = attachmentTexts.join('\n\n');
-        console.log('gmail attachments with text:', attachmentTexts.length);
+        console.log('gmail attachments with text:', attachmentsWithText.length, 'perLimit:', perAttachmentLimit);
       } else if (rawEmailBase64) {
         const parsedEmail = await parseRawEmail(rawEmailBase64);
         attachmentContent = await parseAttachments(
@@ -161,11 +178,7 @@ export function defineJob(agenda: Agenda): void {
         console.log('fallback: raw email attachments processed:', parsedEmail.attachments.length);
       }
 
-      const linkContent = await readLinks(sanitized);
-      console.log('links read:', linkContent ? 'yes' : 'none');
-
-      const MAX_CONTEXT_CHARS = 8000;
-      let enrichedContext = [hardened, attachmentContent, linkContent]
+      let enrichedContext = [truncatedBody, attachmentContent, linkContent]
         .filter(Boolean)
         .join('\n\n');
 
@@ -437,6 +450,19 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
         totalCostUsd += draftResult.costUsd;
         const draftText = getTextContent(draftResult.response);
         const draftContent = parseDraftResponse(draftText);
+
+        const DRAFT_REPLY_DELIMITER = /═══ DRAFT REPLY ═══/;
+        const bodyParts = draftContent.body.split(DRAFT_REPLY_DELIMITER);
+        const agentCommentary = bodyParts[0]?.trim() || '';
+        const parsedDraftText = bodyParts[1]?.trim() || draftContent.body;
+
+        try {
+          await inboxItemRepo.updateDraftContent(inboxItemId, agentCommentary, parsedDraftText);
+          logger.info({ inboxItemId, hasCommentary: !!agentCommentary, hasDraftText: !!parsedDraftText }, 'draft content saved to inbox item');
+        } catch (draftSaveError) {
+          const errMsg = draftSaveError instanceof Error ? draftSaveError.message : String(draftSaveError);
+          logger.warn({ error: errMsg, inboxItemId }, 'failed to save draft content to inbox item');
+        }
 
         const replySubject = draftContent.subject.startsWith('Re:')
           ? draftContent.subject

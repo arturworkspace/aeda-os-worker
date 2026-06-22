@@ -35,6 +35,8 @@ export interface IInboxItem {
   body_text: string;
   body_html: string;
   attachments: IAttachment[];
+  agent_commentary: string;
+  draft_text: string;
   received_at: Date;
   message_id: string;
   in_reply_to: string | null;
@@ -90,6 +92,8 @@ const inboxItemSchema = new Schema<IInboxItem>(
     body_text: { type: String, default: '' },
     body_html: { type: String, default: '' },
     attachments: { type: [attachmentSchema], default: [] },
+    agent_commentary: { type: String, default: '' },
+    draft_text: { type: String, default: '' },
     received_at: { type: Date, required: true },
     message_id: { type: String, required: true, unique: true },
     in_reply_to: { type: String, default: null },
