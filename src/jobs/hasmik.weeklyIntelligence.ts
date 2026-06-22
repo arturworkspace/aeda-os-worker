@@ -188,11 +188,23 @@ async function runResearchCall(prompt: string): Promise<{
 
     if (!text) return { signals: [], weekSummaryLine: 'No updates this week.' };
 
-    // Strip markdown fences if present
-    const clean = text.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+    // Extract JSON from response - handle markdown fences and surrounding text
+    let jsonStr = text;
+
+    // Try to find JSON object in the response
+    const jsonMatch = text.match(/\{[\s\S]*"signals"[\s\S]*\}/);
+    if (jsonMatch) {
+      jsonStr = jsonMatch[0];
+    } else {
+      // Fallback: strip markdown fences
+      jsonStr = text
+        .replace(/^[\s\S]*?```json\s*/i, '')
+        .replace(/```[\s\S]*$/i, '')
+        .trim();
+    }
 
     try {
-      return JSON.parse(clean);
+      return JSON.parse(jsonStr);
     } catch {
       logger.warn({ text: text.slice(0, 200) }, '[hasmik] failed to parse research JSON');
       return { signals: [], weekSummaryLine: 'Research parsing failed.' };
