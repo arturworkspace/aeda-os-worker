@@ -105,15 +105,22 @@ export function defineJob(agenda: Agenda): void {
       if (isGmailConfigured() && inboxItem.message_id) {
         try {
           const emailContent = await fetchEmailContentByMessageId(inboxItem.message_id);
-          if (emailContent.body_text || emailContent.body_html) {
+          if (emailContent.body_text || emailContent.body_html || emailContent.attachments.length > 0) {
             await inboxItemRepo.updateEmailBody(
               inboxItemId,
               emailContent.body_text,
-              emailContent.body_html
+              emailContent.body_html,
+              emailContent.attachments
             );
             logger.info(
-              { inboxItemId, hasText: !!emailContent.body_text, hasHtml: !!emailContent.body_html },
-              'gmail body content fetched'
+              {
+                inboxItemId,
+                hasText: !!emailContent.body_text,
+                hasHtml: !!emailContent.body_html,
+                attachmentCount: emailContent.attachments.length,
+                attachmentsWithText: emailContent.attachments.filter(a => a.text_content).length,
+              },
+              'gmail content fetched'
             );
           }
         } catch (gmailFetchError) {

@@ -1,4 +1,6 @@
 import { google, gmail_v1 } from 'googleapis';
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+import mammoth from 'mammoth';
 import { writeAuditEvent } from '../core/auditLog.js';
 import { logger } from '../logger.js';
 
@@ -196,12 +198,20 @@ export function getPendingSendLabelId(): string | null {
   return pendingSendLabelId;
 }
 
+export interface AttachmentContent {
+  filename: string;
+  mimeType: string;
+  size: number;
+  text_content: string;
+}
+
 export interface EmailContent {
   body_text: string;
   body_html: string;
   subject: string;
   from: string;
   date: string;
+  attachments: AttachmentContent[];
 }
 
 function decodeBase64Url(data: string): string {
@@ -214,7 +224,8 @@ function decodeBase64Url(data: string): string {
 
 interface MessagePart {
   mimeType?: string | null;
-  body?: { data?: string | null } | null;
+  filename?: string | null;
+  body?: { data?: string | null; attachmentId?: string | null; size?: number | null } | null;
   parts?: MessagePart[] | null;
 }
 
@@ -255,6 +266,143 @@ function getHeader(headers: MessageHeader[] | null | undefined, name: string): s
   return header?.value ?? '';
 }
 
+function collectAllParts(payload: MessagePart | null | undefined): MessagePart[] {
+  const parts: MessagePart[] = [];
+  if (!payload) return parts;
+
+  parts.push(payload);
+  if (payload.parts) {
+    for (const part of payload.parts) {
+      parts.push(...collectAllParts(part));
+    }
+  }
+  return parts;
+}
+
+const MAX_ATTACHMENT_SIZE = 5_000_000;
+const MAX_TEXT_CONTENT_CHARS = 8000;
+const MAX_ATTACHMENTS = 5;
+
+const SUPPORTED_MIME_TYPES = [
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/msword',
+  'application/pdf',
+  'text/plain',
+];
+
+async function extractPdfText(buffer: Buffer): Promise<string> {
+  const data = new Uint8Array(buffer);
+  const doc = await pdfjs.getDocument({ data }).promise;
+  const textParts: string[] = [];
+
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items
+      .map((item: unknown) => (item as { str?: string }).str ?? '')
+      .join(' ');
+    textParts.push(pageText);
+  }
+
+  return textParts.join('\n\n');
+}
+
+async function extractDocxText(buffer: Buffer): Promise<string> {
+  const result = await mammoth.extractRawText({ buffer });
+  return result.value;
+}
+
+async function extractAttachmentText(
+  gmail: gmail_v1.Gmail,
+  gmailMessageId: string,
+  part: MessagePart
+): Promise<AttachmentContent> {
+  const filename = part.filename ?? 'unknown';
+  const mimeType = part.mimeType ?? 'application/octet-stream';
+  const size = part.body?.size ?? 0;
+
+  const emptyResult: AttachmentContent = {
+    filename,
+    mimeType,
+    size,
+    text_content: '',
+  };
+
+  if (!part.body?.attachmentId) {
+    return emptyResult;
+  }
+
+  if (size > MAX_ATTACHMENT_SIZE) {
+    logger.warn(
+      { filename, size, maxSize: MAX_ATTACHMENT_SIZE },
+      'attachment exceeds size limit, skipping text extraction'
+    );
+    return emptyResult;
+  }
+
+  const isSupportedType = SUPPORTED_MIME_TYPES.includes(mimeType) ||
+    filename.toLowerCase().endsWith('.docx') ||
+    filename.toLowerCase().endsWith('.doc') ||
+    filename.toLowerCase().endsWith('.pdf') ||
+    filename.toLowerCase().endsWith('.txt');
+
+  if (!isSupportedType) {
+    return emptyResult;
+  }
+
+  try {
+    const attachmentRes = await gmail.users.messages.attachments.get({
+      userId: 'me',
+      messageId: gmailMessageId,
+      id: part.body.attachmentId,
+    });
+
+    const attachmentData = attachmentRes.data.data;
+    if (!attachmentData) {
+      logger.warn({ filename }, 'attachment data is empty');
+      return emptyResult;
+    }
+
+    const buffer = Buffer.from(attachmentData, 'base64url');
+    let textContent = '';
+
+    if (
+      mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+      mimeType === 'application/msword' ||
+      filename.toLowerCase().endsWith('.docx') ||
+      filename.toLowerCase().endsWith('.doc')
+    ) {
+      textContent = await extractDocxText(buffer);
+    } else if (
+      mimeType === 'application/pdf' ||
+      filename.toLowerCase().endsWith('.pdf')
+    ) {
+      textContent = await extractPdfText(buffer);
+    } else if (
+      mimeType === 'text/plain' ||
+      filename.toLowerCase().endsWith('.txt')
+    ) {
+      textContent = buffer.toString('utf-8');
+    }
+
+    if (textContent.length > MAX_TEXT_CONTENT_CHARS) {
+      textContent = textContent.slice(0, MAX_TEXT_CONTENT_CHARS);
+      logger.info({ filename, originalLength: textContent.length }, 'attachment text truncated');
+    }
+
+    return {
+      filename,
+      mimeType,
+      size,
+      text_content: textContent,
+    };
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errMsg, filename }, 'failed to extract attachment text');
+    return emptyResult;
+  }
+}
+
 export async function fetchEmailContentByMessageId(rfc5322MessageId: string): Promise<EmailContent> {
   const emptyResult: EmailContent = {
     body_text: '',
@@ -262,6 +410,7 @@ export async function fetchEmailContentByMessageId(rfc5322MessageId: string): Pr
     subject: '',
     from: '',
     date: '',
+    attachments: [],
   };
 
   if (!gmailClient || !oauth2Client) {
@@ -310,12 +459,36 @@ export async function fetchEmailContentByMessageId(rfc5322MessageId: string): Pr
 
     const { text, html } = extractBodyParts(payload);
 
+    const allParts = collectAllParts(payload);
+    const attachmentParts = allParts.filter(
+      (part) => part.filename && part.filename.length > 0 && part.body?.attachmentId
+    );
+
+    if (attachmentParts.length > MAX_ATTACHMENTS) {
+      logger.warn(
+        { totalAttachments: attachmentParts.length, processed: MAX_ATTACHMENTS },
+        'email has more attachments than limit, processing first 5 only'
+      );
+    }
+
+    const attachments: AttachmentContent[] = [];
+    for (const part of attachmentParts.slice(0, MAX_ATTACHMENTS)) {
+      const extracted = await extractAttachmentText(gmailClient, gmailMessageId, part);
+      attachments.push(extracted);
+    }
+
+    logger.info(
+      { attachmentCount: attachments.length, withText: attachments.filter(a => a.text_content).length },
+      'attachments processed'
+    );
+
     return {
       body_text: text,
       body_html: html,
       subject: getHeader(headers, 'Subject'),
       from: getHeader(headers, 'From'),
       date: getHeader(headers, 'Date'),
+      attachments,
     };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);

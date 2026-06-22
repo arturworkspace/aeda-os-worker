@@ -1,5 +1,5 @@
 import { Types, FilterQuery, UpdateQuery } from 'mongoose';
-import { InboxItem, IInboxItem, IInboxItemDocument, ICrmMatch, IRouting, ProcessingStatus } from '../schemas/inboxItem.js';
+import { InboxItem, IInboxItem, IInboxItemDocument, ICrmMatch, IRouting, IAttachment, ProcessingStatus } from '../schemas/inboxItem.js';
 
 export interface CreateInboxItemInput {
   recipient: string;
@@ -117,12 +117,13 @@ export const inboxItemRepo = {
   async updateEmailBody(
     id: Types.ObjectId | string,
     bodyText: string,
-    bodyHtml: string
+    bodyHtml: string,
+    attachments?: IAttachment[]
   ): Promise<IInboxItemDocument | null> {
-    return InboxItem.findByIdAndUpdate(
-      id,
-      { body_text: bodyText, body_html: bodyHtml },
-      { new: true }
-    ).exec();
+    const update: Record<string, unknown> = { body_text: bodyText, body_html: bodyHtml };
+    if (attachments !== undefined) {
+      update['attachments'] = attachments;
+    }
+    return InboxItem.findByIdAndUpdate(id, update, { new: true }).exec();
   },
 };
