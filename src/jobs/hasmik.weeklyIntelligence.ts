@@ -39,13 +39,51 @@ const ORG_DOMAINS = [
       Focus on deals under $2M in EU or EECA markets.`,
   },
   {
-    id: 'competitor',
+    id: 'competitor-stablecoin',
     category: 'competitor',
+    tags: ['stablecoin-app'],
     relevantAgents: ['tatev', 'chris', 'alex', 'artur'],
-    searchFocus: `Competitor moves: Wise, Revolut, Remitly, MoneyGram, Western Union
-      in Armenia/EECA corridor. New product launches, pricing changes, corridor entries/exits,
-      regulatory issues. Any new stablecoin wallet or EUR-AMD transfer product announced.
-      Note: Wise exited Armenia corridor in 2024 — flag immediately if they return.`,
+    searchFocus: `Monitor these direct stablecoin wallet competitors to aeda:
+      - Rizon (getrizon.com) — stablecoin wallet
+      - Sling Money (sling.money) — stablecoin payments
+      - Zixi Pay (zixipay.com) — cross-border stablecoin payments
+      - Parsek (parsekapp.com) — stablecoin payments app
+      - PEXX (pexx.com) — crypto/fiat stablecoin transfers
+      - Dollarize (dollarize.me) — dollar stablecoin wallet
+      - DolarApp (dolarapp.com) — dollar wallet
+      - Stables (stables.money) — stablecoin personal finance
+      - Bmoni (bmoni.com) — stablecoin money transfer
+      - Payy (payy.link) — stablecoin payment links
+      - Sentz (sentz.com) — stablecoin send money app
+
+      FOR EACH: check product launches, new corridors, funding rounds,
+      regulatory approvals, pricing changes, partnership announcements,
+      app store updates.
+
+      PRIORITY FLAGS (always report):
+      - Any entering EUR→AMD corridor
+      - Any raising funding above $500K
+      - Any receiving EU regulatory approval (EMI, CASP, PI)
+      - Any partnering with Bridge.xyz, Sky Labs, or Sumsub`,
+  },
+  {
+    id: 'competitor-remittance',
+    category: 'competitor',
+    tags: ['remittance'],
+    relevantAgents: ['tatev', 'chris', 'alex', 'artur'],
+    searchFocus: `Monitor these established remittance and payment network competitors:
+      - Wise — pricing changes, corridor updates, Armenia status
+        (NOTE: Wise exited Armenia 2024 — flag IMMEDIATELY if they return)
+      - Revolut — new features, EECA corridor expansion, stablecoin moves
+      - Remitly — pricing, Armenia/EECA coverage changes
+      - MoneyGram — corridor updates, crypto/stablecoin integration
+      - Western Union — EECA corridor, digital product updates
+      - Swift — gpi updates, new payment rails
+      - Visa — stablecoin settlement, B2B payments, EECA
+      - Mastercard — stablecoin products, Send platform updates
+
+      FOR EACH: check product launches, pricing changes, corridor entries/exits,
+      stablecoin integration announcements, regulatory news.`,
   },
   {
     id: 'partner',
@@ -291,6 +329,7 @@ async function saveSignal(opts: {
     sourceLabel: string;
   };
   category: string;
+  tags?: string[];
   scope: 'organization' | 'professional';
   relevantAgents?: string[];
   targetAgent?: string;
@@ -302,6 +341,7 @@ async function saveSignal(opts: {
     title: signal.title,
     summary: signal.summary,
     category,
+    tags: opts.tags ?? [],
     scope,
     relevantAgents: scope === 'organization' ? (relevantAgents ?? []) : [targetAgent],
     targetAgent: scope === 'professional' ? targetAgent : undefined,
@@ -350,6 +390,7 @@ export function defineJob(agenda: Agenda): void {
           await saveSignal({
             signal,
             category: domain.category,
+            tags: (domain as { tags?: string[] }).tags ?? [],
             scope: 'organization',
             relevantAgents: domain.relevantAgents,
             expiresInDays: 7,
