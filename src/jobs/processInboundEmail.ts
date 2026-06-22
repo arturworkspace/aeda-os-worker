@@ -7,7 +7,7 @@ import { sanitizeBody, hardenBody, parseRawEmail } from '../services/emailParser
 import { parseAttachments } from '../services/attachmentParser.js';
 import { readLinks } from '../services/linkReader.js';
 import { matchSender } from '../services/crmMatcher.js';
-import { createDraft, isGmailConfigured } from '../services/gmail.js';
+import { createDraft, isGmailConfigured, fetchEmailContentByMessageId } from '../services/gmail.js';
 import { routedCall, getTextContent } from '../core/modelRouter.js';
 import { writeAuditEvent } from '../core/auditLog.js';
 import { getPersona } from '../agents/personas.js';
@@ -100,6 +100,26 @@ export function defineJob(agenda: Agenda): void {
       const inboxItem = await inboxItemRepo.findById(inboxItemId);
       if (!inboxItem) {
         throw new Error(`inbox item not found: ${inboxItemId}`);
+      }
+
+      if (isGmailConfigured() && inboxItem.message_id) {
+        try {
+          const emailContent = await fetchEmailContentByMessageId(inboxItem.message_id);
+          if (emailContent.body_text || emailContent.body_html) {
+            await inboxItemRepo.updateEmailBody(
+              inboxItemId,
+              emailContent.body_text,
+              emailContent.body_html
+            );
+            logger.info(
+              { inboxItemId, hasText: !!emailContent.body_text, hasHtml: !!emailContent.body_html },
+              'gmail body content fetched'
+            );
+          }
+        } catch (gmailFetchError) {
+          const errMsg = gmailFetchError instanceof Error ? gmailFetchError.message : String(gmailFetchError);
+          logger.warn({ error: errMsg, inboxItemId }, 'gmail body fetch failed, continuing with raw body');
+        }
       }
 
       const sanitized = sanitizeBody(inboxItem.body_raw);

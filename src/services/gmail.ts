@@ -195,3 +195,131 @@ export function isGmailConfigured(): boolean {
 export function getPendingSendLabelId(): string | null {
   return pendingSendLabelId;
 }
+
+export interface EmailContent {
+  body_text: string;
+  body_html: string;
+  subject: string;
+  from: string;
+  date: string;
+}
+
+function decodeBase64Url(data: string): string {
+  try {
+    return Buffer.from(data, 'base64url').toString('utf-8');
+  } catch {
+    return '';
+  }
+}
+
+interface MessagePart {
+  mimeType?: string | null;
+  body?: { data?: string | null } | null;
+  parts?: MessagePart[] | null;
+}
+
+interface MessageHeader {
+  name?: string | null;
+  value?: string | null;
+}
+
+function extractBodyParts(payload: MessagePart | null | undefined): { text: string; html: string } {
+  let text = '';
+  let html = '';
+
+  if (!payload) return { text, html };
+
+  if (payload.body?.data) {
+    const decoded = decodeBase64Url(payload.body.data);
+    if (payload.mimeType === 'text/plain' && !text) {
+      text = decoded;
+    } else if (payload.mimeType === 'text/html' && !html) {
+      html = decoded;
+    }
+  }
+
+  if (payload.parts) {
+    for (const part of payload.parts) {
+      const nested = extractBodyParts(part);
+      if (nested.text && !text) text = nested.text;
+      if (nested.html && !html) html = nested.html;
+    }
+  }
+
+  return { text, html };
+}
+
+function getHeader(headers: MessageHeader[] | null | undefined, name: string): string {
+  if (!headers) return '';
+  const header = headers.find((h) => h.name?.toLowerCase() === name.toLowerCase());
+  return header?.value ?? '';
+}
+
+export async function fetchEmailContentByMessageId(rfc5322MessageId: string): Promise<EmailContent> {
+  const emptyResult: EmailContent = {
+    body_text: '',
+    body_html: '',
+    subject: '',
+    from: '',
+    date: '',
+  };
+
+  if (!gmailClient || !oauth2Client) {
+    logger.warn('gmail client not initialized, cannot fetch email content');
+    return emptyResult;
+  }
+
+  if (!rfc5322MessageId) {
+    logger.warn('empty message id provided, skipping gmail fetch');
+    return emptyResult;
+  }
+
+  try {
+    await refreshAccessToken();
+
+    const cleanMessageId = rfc5322MessageId.replace(/^<|>$/g, '');
+    const searchQuery = `rfc822msgid:${cleanMessageId}`;
+
+    const searchResponse = await gmailClient.users.messages.list({
+      userId: 'me',
+      q: searchQuery,
+      maxResults: 1,
+    });
+
+    const messages = searchResponse.data.messages;
+    if (!messages || messages.length === 0) {
+      logger.info({ rfc5322MessageId }, 'no gmail message found for message id');
+      return emptyResult;
+    }
+
+    const firstMessage = messages[0];
+    const gmailMessageId = firstMessage?.id;
+    if (!gmailMessageId) {
+      logger.warn({ rfc5322MessageId }, 'gmail search returned message without id');
+      return emptyResult;
+    }
+
+    const messageResponse = await gmailClient.users.messages.get({
+      userId: 'me',
+      id: gmailMessageId,
+      format: 'full',
+    });
+
+    const payload = messageResponse.data.payload;
+    const headers = payload?.headers;
+
+    const { text, html } = extractBodyParts(payload);
+
+    return {
+      body_text: text,
+      body_html: html,
+      subject: getHeader(headers, 'Subject'),
+      from: getHeader(headers, 'From'),
+      date: getHeader(headers, 'Date'),
+    };
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errMsg, rfc5322MessageId }, 'failed to fetch email content from gmail');
+    return emptyResult;
+  }
+}

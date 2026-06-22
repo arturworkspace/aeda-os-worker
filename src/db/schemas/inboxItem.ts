@@ -25,6 +25,8 @@ export interface IInboxItem {
   body_raw: string;
   body_sanitized: string;
   body_hardened: string;
+  body_text: string;
+  body_html: string;
   received_at: Date;
   message_id: string;
   in_reply_to: string | null;
@@ -67,6 +69,8 @@ const inboxItemSchema = new Schema<IInboxItem>(
     body_raw: { type: String, default: '' },
     body_sanitized: { type: String, default: '' },
     body_hardened: { type: String, default: '' },
+    body_text: { type: String, default: '' },
+    body_html: { type: String, default: '' },
     received_at: { type: Date, required: true },
     message_id: { type: String, required: true, unique: true },
     in_reply_to: { type: String, default: null },

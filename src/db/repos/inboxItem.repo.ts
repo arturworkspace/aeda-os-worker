@@ -113,4 +113,16 @@ export const inboxItemRepo = {
       .limit(limit)
       .exec();
   },
+
+  async updateEmailBody(
+    id: Types.ObjectId | string,
+    bodyText: string,
+    bodyHtml: string
+  ): Promise<IInboxItemDocument | null> {
+    return InboxItem.findByIdAndUpdate(
+      id,
+      { body_text: bodyText, body_html: bodyHtml },
+      { new: true }
+    ).exec();
+  },
 };
