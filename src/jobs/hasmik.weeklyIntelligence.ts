@@ -323,6 +323,82 @@ const ORG_DOMAINS = [
       New API versions, pricing changes, outages, policy updates, new corridor support.`,
   },
   {
+    id: 'security',
+    category: 'technology',
+    tags: ['security'],
+    relevantAgents: ['vagho', 'hamazasp', 'artur', 'narek'],
+    searchFocus: `Search for the most critical security developments
+      this week relevant to aeda's infrastructure and AI workspace.
+      aeda runs: Next.js on Vercel, Node.js/Express on Railway,
+      MongoDB Atlas, Anthropic Claude API, Cloudflare Workers/R2,
+      Solana blockchain, AWS ECS.
+
+      MANDATORY: Every signal must include exact source URL.
+      Only official security advisories, CVE databases,
+      vendor security bulletins, and reputable security media.
+
+      CRITICAL SOURCES TO CHECK:
+
+      CVE & VULNERABILITY DATABASES:
+      - NVD (nvd.nist.gov) — new CVEs for: Node.js, Express,
+        MongoDB, Next.js, Vercel, Cloudflare, Solana, React
+      - GitHub Security Advisories (github.com/advisories) —
+        npm package vulnerabilities in our dependency tree
+      - Snyk Vulnerability Database (security.snyk.io) —
+        Node.js ecosystem vulnerabilities
+
+      CLOUD & INFRASTRUCTURE SECURITY:
+      - Vercel Security Blog (vercel.com/blog/security) —
+        platform security updates, edge function security
+      - Cloudflare Security Blog (blog.cloudflare.com) —
+        Workers security, DDoS protection updates, R2 access
+      - Railway Security Updates (railway.app/changelog) —
+        deployment security, environment variable handling
+      - MongoDB Security Advisories (mongodb.com/alerts) —
+        Atlas security, driver vulnerabilities, auth changes
+      - AWS Security Bulletins (aws.amazon.com/security/bulletins)
+        ECS, IAM, S3 security updates
+
+      AI & AGENT SECURITY (critical for aeda workspace):
+      - Anthropic Security (anthropic.com/research/security) —
+        Claude API security, prompt injection research
+      - OWASP LLM Top 10 updates (owasp.org) —
+        LLM-specific attack vectors, agent security
+      - Simon Willison's blog (simonwillison.net) —
+        prompt injection, LLM security research
+      - AI security incidents: any reported jailbreaks,
+        data leakage via LLMs, agent manipulation attacks
+
+      FINTECH & CRYPTO SECURITY:
+      - Solana Foundation Security (solana.com/news) —
+        protocol vulnerabilities, validator security
+      - Circle Security (circle.com/blog) —
+        EURC/USDC smart contract audits, custody security
+      - Chainalysis (chainalysis.com/blog) —
+        crypto fraud techniques, wallet attack vectors
+      - EU ENISA (enisa.europa.eu) —
+        European fintech cybersecurity threats, incident reports
+
+      PAYMENT SECURITY STANDARDS:
+      - PCI DSS updates (pcisecuritystandards.org)
+      - SWIFT security advisories
+      - Any reported breaches at: payment processors,
+        stablecoin platforms, crypto wallets, EU fintechs
+
+      PRIORITY FLAGS (always report with source URL):
+      - Any CVE affecting Node.js, Express, or Next.js rated 7.0+
+      - Any Anthropic Claude API security advisory
+      - Any Vercel or Railway platform security incident
+      - Any MongoDB Atlas vulnerability
+      - Any Solana protocol security issue
+      - Any reported AI agent manipulation or prompt injection
+        attack in production systems
+      - Any EU fintech or stablecoin platform breach
+      - Zero-day vulnerabilities in our stack dependencies
+      - Any new LLM jailbreak technique that bypasses safety
+        measures in production AI agents`,
+  },
+  {
     id: 'influencer',
     category: 'education',
     sourceType: 'linkedin',
@@ -440,7 +516,74 @@ const AGENT_DOMAINS = [
   {
     agentId: 'vagho',
     category: 'technology',
-    domain: 'OWASP top 10 updates, Zero Trust architecture developments, crypto wallet security vulnerabilities, API security best practices, Railway and Vercel security features, new CVEs relevant to Node.js stack',
+    domain: `Weekly security training briefing for aeda's
+      Security Officer. Research the following domains and
+      provide a structured intelligence update.
+
+      OWASP & APPLICATION SECURITY:
+      - OWASP Top 10 Web (owasp.org/Top10) — any updates,
+        new techniques for injection, broken auth, XSS,
+        insecure design, security misconfiguration
+      - OWASP API Security Top 10 — API-specific vulnerabilities
+        critical for aeda's REST API surface
+      - OWASP LLM Top 10 — AI-specific security for our
+        14-agent workspace (prompt injection, training data
+        poisoning, insecure output handling, model DoS)
+
+      ZERO TRUST & INFRASTRUCTURE:
+      - Zero Trust architecture developments — new frameworks,
+        NIST guidance updates, practical implementation patterns
+      - Identity and Access Management (IAM) best practices —
+        session management, token security, OAuth2 updates
+      - Secrets management — HashiCorp Vault updates,
+        environment variable security patterns for Vercel/Railway
+      - Container/serverless security — Vercel Edge security,
+        Railway container hardening techniques
+
+      CRYPTO & WALLET SECURITY:
+      - Non-custodial wallet attack vectors — phishing campaigns
+        targeting EURC/stablecoin wallets, private key exposure
+        techniques, social engineering patterns
+      - Solana ecosystem security incidents — smart contract
+        vulnerabilities, RPC endpoint attacks, validator issues
+      - Hardware Security Module (HSM) and key management
+        best practices for non-custodial architecture
+      - EURC/stablecoin specific security — Circle audit reports,
+        bridge protocol vulnerabilities
+
+      AI AGENT & WORKSPACE SECURITY:
+      - Prompt injection attack research — new techniques,
+        real-world exploits against production AI systems
+      - Agent manipulation — multi-agent attack vectors,
+        context poisoning, instruction hijacking
+      - LLM data exfiltration — techniques attackers use to
+        extract sensitive context from AI agents
+      - Anthropic Claude API security best practices —
+        system prompt protection, context window security
+      - MCP (Model Context Protocol) security — new attack
+        surfaces as MCP adoption grows
+
+      INCIDENT RESPONSE & THREAT INTELLIGENCE:
+      - Recent fintech security incidents this week —
+        any breaches at payment companies, crypto platforms,
+        EU financial services
+      - New ransomware targeting financial infrastructure
+      - DDoS patterns targeting financial APIs
+      - Social engineering campaigns targeting fintech founders
+        and startup teams (SIM swapping, business email compromise)
+
+      COMPLIANCE SECURITY (MiCA/GDPR intersection):
+      - GDPR security breach notifications — any EU financial
+        company reporting incidents (learning opportunity)
+      - MiCA operational resilience requirements —
+        DORA technical standards updates for ICT security
+      - EBA ICT Risk framework updates
+      - Czech NBÚ (cybersecurity authority) advisories
+
+      FORMAT: Provide a structured weekly security briefing
+      with clear sections. Each finding must include:
+      severity (Critical/High/Medium/Low), source URL,
+      and a concrete recommendation for aeda's specific stack.`,
   },
   {
     agentId: 'mike',
