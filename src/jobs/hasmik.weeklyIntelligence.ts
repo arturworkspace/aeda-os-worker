@@ -1070,7 +1070,7 @@ export function defineJob(agenda: Agenda): void {
 }
 
 export async function scheduleJob(agenda: Agenda): Promise<void> {
-  // Monday 07:00 Prague time — requires TZ=Europe/Prague in Railway env vars
-  await agenda.every('0 7 * * 1', JOB_NAME, {}, { timezone: 'Europe/Prague' });
-  logger.info('[hasmik] weekly intelligence job scheduled — Monday 07:00 Prague');
+  // Monday 19:00 Prague time — requires TZ=Europe/Prague in Railway env vars
+  await agenda.every('0 19 * * 1', JOB_NAME, {}, { timezone: 'Europe/Prague' });
+  logger.info('[hasmik] weekly intelligence job scheduled — Monday 19:00 Prague');
 }
