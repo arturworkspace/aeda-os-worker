@@ -1009,15 +1009,16 @@ aeda is a pre-seed non-custodial EURC stablecoin wallet
 (EU-Armenia corridor, Prague, Czech Republic).
 Raising $500K at $5M pre-money valuation.
 
-Your job: find genuine fundraising news from this week.
+Your job: find genuine fundraising news from the LAST 30 DAYS.
 
 RELEVANT CATEGORIES for aeda:
 stablecoins, cross-border payments, embedded wallets,
 wallet infrastructure, BaaS, compliance/KYC, crypto infrastructure,
-AI+payments, remittances, Solana ecosystem, EU fintech.
+AI+payments, remittances, Solana ecosystem, fintech.
 
 WHAT TO SEARCH FOR:
-1. Fintech/stablecoin startups that raised funding THIS WEEK
+1. Fintech, stablecoin, crypto wallet startups that raised funding
+   (pre-seed, seed, Series A, Series B, Series C) in last 30 days
 2. Open accelerator programs, grants, ecosystem funds
    that aeda could apply to
 
@@ -1030,15 +1031,11 @@ aeda profile for eligibility assessment:
 - MiCA compliant technology network
 
 SOURCES TO CHECK:
-Raises: TechCrunch, The Block, Fortune Crypto, Axios Pro Rata,
-        Crunchbase News, Bloomberg Crypto, EU-Startups,
-        Sifted (EU fintech), The Information
+Raises: TechCrunch, The Block, Fortune Crypto, Crunchbase News,
+        EU-Startups, Sifted, CoinDesk, Decrypt
 
-Opportunities: F6S, Seedstars, EIC Accelerator,
-               Solana Foundation grants, Circle grants,
-               Techstars Fintech, Y Combinator,
-               Startup Lithuania, CzechInvest,
-               EU Horizon grants, Fintech Lithuania`;
+Opportunities: F6S, Seedstars, Solana Foundation grants,
+               Circle grants, Techstars, Y Combinator`;
 
   // Step 1: Research
   let researchText = "";
@@ -1054,17 +1051,19 @@ Opportunities: F6S, Seedstars, EIC Accelerator,
       }],
       messages: [{
         role: 'user',
-        content: `Search for:
-1. Fintech, stablecoin, and crypto wallet startups that raised
-   funding THIS WEEK (last 7 days). Include: company name,
-   amount, round type, investors, headquarters, what they do.
+        content: `Search for RECENT fintech and crypto fundraising news:
 
-2. Open accelerator programs, grants, and funding opportunities
-   currently accepting applications that aeda (pre-seed EU
-   non-custodial stablecoin wallet) could apply to.
+1. Find 5-10 fintech, stablecoin, or crypto wallet startups that
+   raised funding in the LAST 30 DAYS. Include: company name,
+   amount raised, round type (pre-seed/seed/Series A/B/C),
+   lead investors, headquarters, what they do, source URL.
 
-For every item found, include the exact source URL.
-Write in detailed prose with all facts included.`,
+2. Find 3-5 accelerator programs, grants, or funding opportunities
+   currently accepting applications that a pre-seed EU stablecoin
+   wallet startup could apply to. Include: program name, funding
+   amount, deadline, eligibility, application URL.
+
+Be thorough. List everything you find with source URLs.`,
       }],
     });
     researchText = res1.content
@@ -1132,67 +1131,42 @@ Write in detailed prose with all facts included.`,
   try {
     const res2 = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 2000,
-      system: `Convert research into structured JSON.
-Output ONLY valid JSON, no markdown.
-
-JSON format:
+      max_tokens: 3000,
+      system: `You are a structured data extractor. Return ONLY valid JSON. No markdown, no explanation, no backticks.`,
+      messages: [{
+        role: 'user',
+        content: `Extract all fundraising rounds and opportunities from this research.
+Return JSON with this exact structure:
 {
   "rounds": [
     {
-      "companyName": "string",
-      "companyUrl": "string",
-      "headquarters": "string (city, country)",
-      "category": "stablecoin|wallet|payments|compliance|ai-fintech|crypto-infra|other",
-      "description": "max 80 words what they do",
+      "companyName": "Company Name",
       "amount": 5000000,
       "currency": "USD",
-      "roundType": "pre-seed|seed|series-a|series-b|series-c|other",
-      "announcedDate": "YYYY-MM-DD",
-      "valuation": 0,
-      "investors": [
-        {
-          "name": "Partner name (if known)",
-          "firm": "Fund name",
-          "website": "fund website URL",
-          "geography": "US|EU|Global|etc",
-          "stagePreference": "pre-seed|seed|series-a|etc",
-          "checkSize": "$250K-$2M"
-        }
-      ],
-      "relevanceToAeda": "1-2 sentences: why this is relevant to aeda",
-      "sourceUrl": "exact article URL"
+      "roundType": "seed",
+      "headquarters": "City, Country",
+      "description": "What they do",
+      "investors": [{"firm": "Investor Name"}],
+      "sourceUrl": "https://..."
     }
   ],
   "opportunities": [
     {
-      "programName": "string",
-      "website": "program website URL",
-      "applicationUrl": "direct application URL",
-      "type": "accelerator|grant|incubator|studio|ecosystem-fund",
-      "description": "max 60 words",
-      "fundingAmount": "$150K or range",
-      "equityRequired": "7% or None",
-      "deadline": "YYYY-MM-DD or Rolling or unknown",
-      "geography": ["EU", "Global"],
-      "stageRequirements": "pre-seed, seed",
+      "programName": "Program Name",
+      "fundingAmount": "$50K-$150K",
+      "deadline": "Rolling",
+      "website": "https://...",
       "isAedaEligible": true,
-      "eligibilityReasoning": "why aeda is or is not eligible",
-      "recommendedAction": "concrete next step for aeda",
-      "priority": "High|Medium|Low",
-      "sourceUrl": "exact URL"
+      "description": "What the program offers"
     }
   ]
 }
 
-Rules:
-- Only include raises with confirmed source URLs
-- Only include opportunities currently accepting applications
-- Max 8 rounds, max 5 opportunities
-- If nothing found for a section, return empty array []`,
-      messages: [{
-        role: 'user',
-        content: `Structure this into JSON:\n\n${researchText}`,
+If no raises found, return {"rounds":[],"opportunities":[]}.
+Extract EVERY raise and opportunity mentioned. Do not skip any.
+
+Research text:
+${researchText}`,
       }],
     });
 
