@@ -265,6 +265,61 @@ const ORG_DOMAINS = [
       Sumsub (KYC), Circle (EURC issuer), Solana Foundation grants or partnerships.
       New API versions, pricing changes, outages, policy updates, new corridor support.`,
   },
+  {
+    id: 'influencer',
+    category: 'education',
+    sourceType: 'linkedin',
+    relevantAgents: ['artur', 'chris', 'tatev', 'arshak'],
+    searchFocus: `Search for RECENT insights from these fintech/stablecoin thought leaders.
+      Check their newsletters, blogs, and public posts from THIS WEEK.
+      MANDATORY: Include exact URL to the article, newsletter, or post.
+
+      STABLECOIN & CRYPTO PAYMENTS:
+      - Jeremy Allaire (Circle CEO) — circle.com/blog, substack
+      - Nic Carter — medium.com/@nic__carter, Castle Island VC blog
+      - Nathan Sexer — nathansexer.substack.com
+      - Jake Chervinsky — variant.fund/writing, twitter threads
+      - Caitlin Long — caitlin-long.com, Custodia Bank blog
+
+      FINTECH / PAYMENTS:
+      - Simon Taylor (11:FS) — sytaylor.substack.com, 11fs.com/blog
+      - Lex Sokolin — fintechblueprint.substack.com
+      - Ron Shevlin — forbes.com/sites/ronshevlin
+      - Jason Mikula — fintechbusinessweekly.substack.com
+      - Alex Johnson — alexhjohnson.substack.com (Fintech Takes)
+      - Patrick McKenzie (patio11) — kalzumeus.com, bits about money
+      - Matt Harris — bain.com/insights (Bain Capital Ventures)
+
+      DIGITAL BANKING / NEOBANKS:
+      - Anne Boden (Starling) — anneboden.com
+      - Brett King — brettking.com, Breaking Banks podcast
+      - Chris Skinner — thefinanser.com
+      - Leda Glyptis — ledaglyptis.com, 11:FS
+
+      EU / REGULATION FOCUS:
+      - Marcel van Oost — marcelvanOost.substack.com
+      - Arthur Bedel — arthurbedel.substack.com
+      - David Birch — dgwbirch.com, 15Mb blog
+      - Ghela Boskovich — femtechglobal.org
+
+      AI + FINANCE:
+      - Theodora Lau — unconventionalventures.com
+      - Spiros Margaris — margaris.ai
+      - Efi Pylarinou — efipylarinou.com
+
+      PAYMENTS / COMMERCE:
+      - Karen Webster — pymnts.com (PYMNTS CEO)
+      - Richard Turrin — richardturrin.com (Digital Yuan expert)
+      - Adrienne Harris — if regulatory angle from OCC era
+
+      PRIORITY FLAGS (always report with URL):
+      - Any post about EURC or Circle's euro stablecoin
+      - Any post about non-custodial wallets
+      - Any post about MiCA implications
+      - Any post about EU-EECA corridor payments
+      - Any post about stablecoin vs CBDC debate
+      - Any post about embedded finance for startups`,
+  },
 ];
 
 // ─── Professional domains per agent ─────────────────────────────────────────
@@ -521,6 +576,7 @@ async function saveSignal(opts: {
     sourceLabel: string;
   };
   category: string;
+  sourceType?: string;
   tags?: string[];
   scope: 'organization' | 'professional';
   relevantAgents?: string[];
@@ -538,7 +594,7 @@ async function saveSignal(opts: {
     relevantAgents: scope === 'organization' ? (relevantAgents ?? []) : [targetAgent],
     targetAgent: scope === 'professional' ? targetAgent : undefined,
     source: signal.sourceUrl || 'hasmik-weekly',
-    sourceType: 'article',
+    sourceType: opts.sourceType ?? 'article',
     trustLevel: signal.trustLevel || 'signal',
     confidence: signal.confidence || 'Low',
     verificationStatus: signal.verificationStatus || 'unverifiable',
@@ -582,6 +638,7 @@ export function defineJob(agenda: Agenda): void {
           await saveSignal({
             signal,
             category: domain.category,
+            sourceType: (domain as { sourceType?: string }).sourceType ?? 'article',
             tags: (domain as { tags?: string[] }).tags ?? [],
             scope: 'organization',
             relevantAgents: domain.relevantAgents,
