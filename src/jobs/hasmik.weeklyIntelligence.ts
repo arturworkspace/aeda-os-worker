@@ -798,36 +798,10 @@ async function scoreSignal(signal: {
     };
   }
 
-  const SCORING_SYSTEM = `You score intelligence signals for aeda,
-a pre-seed non-custodial EURC stablecoin wallet (EU-Armenia corridor,
-Prague, Czech Republic). Raising $500K at $5M pre-money.
-Q3 2026 launch target.
-
-SIGNAL SCORING RUBRIC (1-10):
-10 — Direct legislative change affecting aeda NOW
-     (e.g. MiCA amendment mentioning non-custodial wallets)
-9  — Competitor major event with immediate implication
-     (e.g. direct competitor raises $10M+, Wise re-enters Armenia)
-8  — Partner change affecting our stack
-     (e.g. Circle EURC policy change, Bridge.xyz pricing update)
-7  — Market signal, verified, changes fundraising narrative
-     (e.g. EU stablecoin adoption data, remittance corridor stats)
-6  — Regulatory development, 30-60 day implication
-     (e.g. EBA guidance draft, CNB consultation)
-5  — Confirmed news, indirect aeda relevance
-     (e.g. adjacent fintech raises, Solana ecosystem news)
-4  — Useful context, no immediate action
-     (e.g. general EU fintech trends, industry reports)
-3  — Unverified signal, low confidence
-     (e.g. rumors, unconfirmed reports, opinion pieces)
-2  — Near-duplicate or unsourced
-1  — General market noise, no aeda relevance
-
-Respond with ONLY valid JSON:
-{
-  "score": <number 1-10>,
-  "reasoning": "<max 30 words explaining score>"
-}`;
+  const SCORING_SYSTEM = `You are a signal analyst for aeda, a non-custodial EURC stablecoin wallet building the EU-Armenia payment corridor.
+Score intelligence signals 1-10 for aeda relevance.
+Return ONLY valid JSON: {"score": N} where N is 1-10.
+No other text. No markdown.`;
 
   try {
     const scoreResponse = await client.messages.create({
@@ -837,7 +811,24 @@ Respond with ONLY valid JSON:
       messages: [
         {
           role: 'user',
-          content: `Score this signal:\n\nTitle: ${signal.title}\nCategory: ${signal.category}\nSummary: ${signal.summary}\nSource: ${signal.sourceUrl || 'none'}\nTrust: ${signal.trustLevel}`,
+          content: `SCORING RUBRIC:
+10 = Legislative deadline affecting aeda THIS WEEK
+9  = Regulatory change directly affecting EURC/non-custodial wallets
+8  = Partner (Bridge, Sky Labs, Sumsub, Circle) product change
+7  = Competitor major move affecting Armenia corridor
+6  = Market signal changing fundraising narrative
+5  = Confirmed news, indirect but relevant to aeda
+4  = Useful background context
+3  = Unverified or low-confidence signal
+2  = Duplicate or near-duplicate of existing knowledge
+1  = General industry noise, no aeda relevance
+
+Score this signal:
+Title: ${signal.title}
+Category: ${signal.category}
+Summary: ${signal.summary}
+Source: ${signal.sourceUrl || 'none'}
+Trust: ${signal.trustLevel}`,
         },
       ],
     });
@@ -845,10 +836,27 @@ Respond with ONLY valid JSON:
     const firstBlock = scoreResponse.content[0];
     const scoreText =
       firstBlock && firstBlock.type === 'text'
-        ? firstBlock.text
+        ? firstBlock.text.trim()
         : '';
-    const scoreJson = JSON.parse(scoreText.replace(/```json\n?|```/g, '').trim());
-    const signalScore = Math.min(10, Math.max(1, Number(scoreJson.score) || 3));
+
+    // Log raw response for debugging
+    logger.info({ raw: scoreText.slice(0, 200) }, '[hasmik] raw score response');
+
+    // Parse JSON safely - never fallback to default score
+    let parsed: { score?: unknown };
+    try {
+      parsed = JSON.parse(scoreText.replace(/```json\n?|```/g, '').trim());
+    } catch (parseErr) {
+      logger.error({ parseErr, raw: scoreText.slice(0, 100) }, '[hasmik] score JSON parse failed, skipping entry');
+      throw new Error('score_parse_failed');
+    }
+
+    const signalScore = Number(parsed.score);
+    if (isNaN(signalScore) || signalScore < 1 || signalScore > 10) {
+      logger.warn({ raw: scoreText.slice(0, 100), parsedScore: parsed.score }, '[hasmik] invalid score value, skipping entry');
+      throw new Error('invalid_score_value');
+    }
+
     const noiseFlag = signalScore <= 3;
 
     // If score >= 5, run @chris strategic filter
@@ -911,14 +919,9 @@ Respond with ONLY valid JSON:
       arturAction: '',
     };
   } catch (err) {
-    logger.warn({ err }, '[hasmik] signal scoring failed, defaulting to score 3');
-    return {
-      signalScore: 3,
-      noiseFlag: true,
-      strategicImplication: '',
-      actionRequired: false,
-      arturAction: '',
-    };
+    // Re-throw to skip this entry entirely - never write a fallback score
+    logger.warn({ err }, '[hasmik] signal scoring failed, entry will be skipped');
+    throw err;
   }
 }
 
@@ -1073,6 +1076,11 @@ Write in detailed prose with all facts included.`,
     return;
   }
 
+  logger.info(
+    { researchTextLen: researchText.length, preview: researchText.slice(0, 300) },
+    '[hasmik] phase3 research text received'
+  );
+
   if (!researchText || researchText.length < 100) {
     logger.info('[hasmik] no fundraising content found this week');
     return;
@@ -1191,6 +1199,8 @@ Rules:
     const raw = res2.content[0]?.type === 'text'
       ? res2.content[0].text.trim() : '';
 
+    logger.info({ rawLen: raw.length, preview: raw.slice(0, 500) }, '[hasmik] phase3 raw LLM output');
+
     // Brace matching JSON extraction
     const start = raw.indexOf('{');
     if (start !== -1) {
@@ -1201,18 +1211,49 @@ Rules:
       }
       if (end !== -1) {
         structured = JSON.parse(raw.slice(start, end + 1));
+        logger.info(
+          { roundsCount: structured.rounds?.length ?? 0, oppsCount: structured.opportunities?.length ?? 0 },
+          '[hasmik] phase3 parsed JSON'
+        );
+      } else {
+        logger.warn('[hasmik] phase3 WARNING: could not find matching closing brace');
       }
+    } else {
+      logger.warn('[hasmik] phase3 WARNING: no opening brace found in LLM output');
     }
   } catch (err) {
     logger.error({ err }, '[hasmik] fundraising structure step failed');
     return;
   }
 
+  // Log if nothing to write
+  if (!structured.rounds || structured.rounds.length === 0) {
+    logger.warn({ rawPreview: researchText.slice(0, 200) }, '[hasmik] phase3 WARNING: LLM returned no rounds');
+  }
+  if (!structured.opportunities || structured.opportunities.length === 0) {
+    logger.warn('[hasmik] phase3 WARNING: LLM returned no opportunities');
+  }
+
+  // Log model availability
+  logger.info(
+    { FundraisingRoundModel: !!FundraisingRoundModel, FundingOpportunityModel: !!FundingOpportunityModel },
+    '[hasmik] models loaded'
+  );
+
+  // Log rounds to write
+  logger.info(
+    { count: structured.rounds?.length ?? 0, rounds: JSON.stringify(structured.rounds ?? []).slice(0, 500) },
+    '[hasmik] phase3 rounds to write'
+  );
+
   // Save rounds
   let savedRounds = 0;
   for (const round of (structured.rounds ?? [])) {
     try {
-      if (!round.companyName) continue;
+      if (!round.companyName) {
+        logger.warn({ round }, '[hasmik] skipping round without companyName');
+        continue;
+      }
       const doc = new FundraisingRoundModel({
         ...round,
         weekOf,
@@ -1220,17 +1261,27 @@ Rules:
       });
       await doc.save();
       savedRounds++;
+      logger.info({ company: round.companyName }, '[hasmik] saved round');
     } catch (err) {
       logger.error({ err, company: round.companyName },
         '[hasmik] failed to save round');
     }
   }
 
+  // Log opps to write
+  logger.info(
+    { count: structured.opportunities?.length ?? 0, opps: JSON.stringify(structured.opportunities ?? []).slice(0, 500) },
+    '[hasmik] phase3 opps to write'
+  );
+
   // Save opportunities
   let savedOpps = 0;
   for (const opp of (structured.opportunities ?? [])) {
     try {
-      if (!opp.programName) continue;
+      if (!opp.programName) {
+        logger.warn({ opp }, '[hasmik] skipping opportunity without programName');
+        continue;
+      }
       // Check if already exists (avoid duplicates)
       const exists = await (FundingOpportunityModel as mongoose.Model<unknown>).findOne({
         programName: opp.programName,
@@ -1245,6 +1296,9 @@ Rules:
         });
         await doc.save();
         savedOpps++;
+        logger.info({ program: opp.programName }, '[hasmik] saved opportunity');
+      } else {
+        logger.info({ program: opp.programName }, '[hasmik] opportunity already exists, skipping');
       }
     } catch (err) {
       logger.error({ err, program: opp.programName },
@@ -1254,7 +1308,7 @@ Rules:
 
   logger.info(
     { savedRounds, savedOpps },
-    '[hasmik] phase 3 fundraising intelligence complete'
+    '[hasmik] Phase 3 complete'
   );
 }
 
