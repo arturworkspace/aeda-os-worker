@@ -1209,9 +1209,9 @@ for competitive intelligence. Include company, amount, round, investors.`,
   try {
     const res2 = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 3000,
+      max_tokens: 8000,
       system: `You are a structured data extractor. Return ONLY valid JSON. No markdown, no explanation, no backticks.
-eligibilityReasoning and recommendedAction are REQUIRED fields for opportunities. Never leave them empty. If unsure about eligibility, explain why.`,
+Keep descriptions concise (max 2 sentences each). eligibilityReasoning and recommendedAction are REQUIRED.`,
       messages: [{
         role: 'user',
         content: `Extract all fundraising rounds and opportunities from this research.
