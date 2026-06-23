@@ -1,7 +1,8 @@
 import mongoose from 'mongoose';
 import { type Agenda } from 'agenda';
 import Anthropic from '@anthropic-ai/sdk';
-import { KnowledgeEntryModel } from '../db/schemas/knowledge.js';
+import { KnowledgeEntryModel, type IKnowledgeEntry } from '../db/schemas/knowledge.js';
+import { InboxItem } from '../db/schemas/inboxItem.js';
 import { logger } from '../logger.js';
 import { env } from '../config/env.js';
 
@@ -765,6 +766,162 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// ─── Signal Scoring + @chris Strategic Filter ───────────────────────────────
+
+async function scoreSignal(signal: {
+  title: string;
+  summary: string;
+  category: string;
+  sourceUrl: string;
+  trustLevel: string;
+  verificationStatus: string;
+}): Promise<{
+  signalScore: number;
+  noiseFlag: boolean;
+  strategicImplication: string;
+  actionRequired: boolean;
+  arturAction: string;
+}> {
+  // Source gate: regulation/partner without official URL = noise
+  const regulatoryCategories = ['regulation', 'partner'];
+  if (
+    regulatoryCategories.includes(signal.category) &&
+    (!signal.sourceUrl || signal.sourceUrl.trim() === '') &&
+    signal.trustLevel !== 'verified'
+  ) {
+    return {
+      signalScore: 2,
+      noiseFlag: true,
+      strategicImplication: 'No official source — cannot verify regulatory claim.',
+      actionRequired: false,
+      arturAction: '',
+    };
+  }
+
+  const SCORING_SYSTEM = `You score intelligence signals for aeda,
+a pre-seed non-custodial EURC stablecoin wallet (EU-Armenia corridor,
+Prague, Czech Republic). Raising $500K at $5M pre-money.
+Q3 2026 launch target.
+
+SIGNAL SCORING RUBRIC (1-10):
+10 — Direct legislative change affecting aeda NOW
+     (e.g. MiCA amendment mentioning non-custodial wallets)
+9  — Competitor major event with immediate implication
+     (e.g. direct competitor raises $10M+, Wise re-enters Armenia)
+8  — Partner change affecting our stack
+     (e.g. Circle EURC policy change, Bridge.xyz pricing update)
+7  — Market signal, verified, changes fundraising narrative
+     (e.g. EU stablecoin adoption data, remittance corridor stats)
+6  — Regulatory development, 30-60 day implication
+     (e.g. EBA guidance draft, CNB consultation)
+5  — Confirmed news, indirect aeda relevance
+     (e.g. adjacent fintech raises, Solana ecosystem news)
+4  — Useful context, no immediate action
+     (e.g. general EU fintech trends, industry reports)
+3  — Unverified signal, low confidence
+     (e.g. rumors, unconfirmed reports, opinion pieces)
+2  — Near-duplicate or unsourced
+1  — General market noise, no aeda relevance
+
+Respond with ONLY valid JSON:
+{
+  "score": <number 1-10>,
+  "reasoning": "<max 30 words explaining score>"
+}`;
+
+  try {
+    const scoreResponse = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 200,
+      system: SCORING_SYSTEM,
+      messages: [
+        {
+          role: 'user',
+          content: `Score this signal:\n\nTitle: ${signal.title}\nCategory: ${signal.category}\nSummary: ${signal.summary}\nSource: ${signal.sourceUrl || 'none'}\nTrust: ${signal.trustLevel}`,
+        },
+      ],
+    });
+
+    const firstBlock = scoreResponse.content[0];
+    const scoreText =
+      firstBlock && firstBlock.type === 'text'
+        ? firstBlock.text
+        : '';
+    const scoreJson = JSON.parse(scoreText.replace(/```json\n?|```/g, '').trim());
+    const signalScore = Math.min(10, Math.max(1, Number(scoreJson.score) || 3));
+    const noiseFlag = signalScore <= 3;
+
+    // If score >= 5, run @chris strategic filter
+    if (signalScore >= 5) {
+      const CHRIS_SYSTEM = `You are @chris, Strategic Advisor at aeda.
+aeda is raising $500K pre-seed at $5M valuation. Q3 2026 launch.
+Your job: assess if this signal is actionable for fundraise or launch.
+
+Respond with ONLY valid JSON:
+{
+  "strategicImplication": "<1-2 sentences: why this matters for aeda's $500K raise or Q3 launch>",
+  "actionRequired": <true/false>,
+  "arturAction": "<concrete next step for @artur, or empty string if none>"
+}`;
+
+      try {
+        const chrisResponse = await client.messages.create({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 300,
+          system: CHRIS_SYSTEM,
+          messages: [
+            {
+              role: 'user',
+              content: `Assess this signal (score: ${signalScore}/10):\n\nTitle: ${signal.title}\nCategory: ${signal.category}\nSummary: ${signal.summary}`,
+            },
+          ],
+        });
+
+        const chrisBlock = chrisResponse.content[0];
+        const chrisText =
+          chrisBlock && chrisBlock.type === 'text'
+            ? chrisBlock.text
+            : '';
+        const chrisJson = JSON.parse(chrisText.replace(/```json\n?|```/g, '').trim());
+
+        return {
+          signalScore,
+          noiseFlag,
+          strategicImplication: chrisJson.strategicImplication || '',
+          actionRequired: chrisJson.actionRequired === true,
+          arturAction: chrisJson.arturAction || '',
+        };
+      } catch (chrisErr) {
+        logger.warn({ err: chrisErr }, '[hasmik] @chris filter failed, using score only');
+        return {
+          signalScore,
+          noiseFlag,
+          strategicImplication: '',
+          actionRequired: false,
+          arturAction: '',
+        };
+      }
+    }
+
+    return {
+      signalScore,
+      noiseFlag,
+      strategicImplication: '',
+      actionRequired: false,
+      arturAction: '',
+    };
+  } catch (err) {
+    logger.warn({ err }, '[hasmik] signal scoring failed, defaulting to score 3');
+    return {
+      signalScore: 3,
+      noiseFlag: true,
+      strategicImplication: '',
+      actionRequired: false,
+      arturAction: '',
+    };
+  }
+}
+
 async function saveSignal(opts: {
   signal: {
     title: string;
@@ -782,8 +939,33 @@ async function saveSignal(opts: {
   relevantAgents?: string[];
   targetAgent?: string;
   expiresInDays: number;
+  skipScoring?: boolean;
 }): Promise<void> {
   const { signal, category, scope, relevantAgents, targetAgent, expiresInDays } = opts;
+
+  // Score the signal unless skipped
+  let scoring = {
+    signalScore: 5,
+    noiseFlag: false,
+    strategicImplication: '',
+    actionRequired: false,
+    arturAction: '',
+  };
+
+  if (!opts.skipScoring) {
+    scoring = await scoreSignal({
+      title: signal.title,
+      summary: signal.summary,
+      category,
+      sourceUrl: signal.sourceUrl,
+      trustLevel: signal.trustLevel,
+      verificationStatus: signal.verificationStatus,
+    });
+    logger.info(
+      { title: signal.title.slice(0, 50), score: scoring.signalScore, noise: scoring.noiseFlag },
+      '[hasmik] signal scored'
+    );
+  }
 
   const doc = new KnowledgeEntryModel({
     title: signal.title,
@@ -804,6 +986,12 @@ async function saveSignal(opts: {
     permanent: false,
     status: 'active',
     expiresAt: new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000),
+    signalScore: scoring.signalScore,
+    noiseFlag: scoring.noiseFlag,
+    strategicImplication: scoring.strategicImplication,
+    actionRequired: scoring.actionRequired,
+    arturAction: scoring.arturAction,
+    scoredAt: new Date(),
   });
   await doc.save();
 }
@@ -1070,6 +1258,120 @@ Rules:
   );
 }
 
+// ─── Phase 4: @chris Weekly Board Brief ─────────────────────────────────────
+
+async function generateWeeklyBoardBrief(): Promise<void> {
+  logger.info('[hasmik] phase 4: @chris weekly board brief');
+
+  // Get this week's high-score signals (score >= 6)
+  const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const highSignals: any[] = await (KnowledgeEntryModel as any).find({
+    status: 'active',
+    addedBy: 'hasmik',
+    signalScore: { $gte: 6 },
+    createdAt: { $gte: oneWeekAgo },
+  })
+    .sort({ signalScore: -1, createdAt: -1 })
+    .limit(20)
+    .exec();
+
+  if (highSignals.length === 0) {
+    logger.info('[hasmik] phase 4: no high-score signals this week, skipping brief');
+    return;
+  }
+
+  const signalSummaries = highSignals.map((s: any, i: number) =>
+    `${i + 1}. [Score ${s.signalScore}] ${s.title}\n   ${s.summary}\n   Strategic: ${s.strategicImplication || 'N/A'}`
+  ).join('\n\n');
+
+  const CHRIS_BRIEF_SYSTEM = `You are @chris, Strategic Advisor at aeda.
+aeda is a pre-seed non-custodial EURC stablecoin wallet (EU-Armenia corridor, Prague).
+Raising $500K at $5M pre-money. Q3 2026 launch target.
+
+Your job: produce a concise 1-page board brief from this week's intelligence signals.
+
+FORMAT (strict):
+# AEDA WEEKLY INTELLIGENCE BRIEF
+Week of [date]
+
+## TOP 5 SIGNALS (ranked by importance)
+For each:
+- **[Signal title]** (Score: X/10)
+  - What happened: [1 sentence]
+  - Why it matters for aeda: [1-2 sentences, specific to $500K raise or Q3 launch]
+  - Recommended action: [concrete step for @artur, or "Monitor"]
+
+## RECOMMENDED @ARTUR ACTIONS THIS WEEK
+[Numbered list of 3-5 specific actions derived from signals]
+
+## WHAT I'D CHALLENGE THIS WEEK
+[1 contrarian take — something everyone assumes that might be wrong,
+ or a risk nobody's discussing, or an opportunity being overlooked]
+
+Keep it sharp. No filler. CEOs read fast.`;
+
+  try {
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2000,
+      system: CHRIS_BRIEF_SYSTEM,
+      messages: [
+        {
+          role: 'user',
+          content: `Generate the weekly board brief from these ${highSignals.length} high-priority signals:\n\n${signalSummaries}`,
+        },
+      ],
+    });
+
+    const briefBlock = response.content[0];
+    const briefContent =
+      briefBlock && briefBlock.type === 'text' ? briefBlock.text : '';
+
+    if (!briefContent) {
+      logger.warn('[hasmik] phase 4: @chris returned empty brief');
+      return;
+    }
+
+    // Save to @artur's inbox as weekly-clevel-brief
+    const weekOf = new Date().toISOString().slice(0, 10);
+    const messageId = `weekly-clevel-brief-${weekOf}`;
+
+    await InboxItem.findOneAndUpdate(
+      { message_id: messageId },
+      {
+        $set: {
+          recipient: 'artur',
+          sender_email: 'chris@aeda.internal',
+          sender_name: '@chris (Strategic Advisor)',
+          subject: `Weekly Board Brief — ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`,
+          body_text: briefContent,
+          body_sanitized: briefContent,
+          agent_commentary: `Weekly intelligence brief synthesized by @chris from ${highSignals.length} high-priority signals (score ≥6).`,
+          received_at: new Date(),
+          message_id: messageId,
+          processing_status: 'draft_created',
+          routing: {
+            artur_classification: 'weekly-clevel-brief',
+            routed_to_agent: 'artur',
+            artur_brief: 'Weekly board brief from @chris — review top signals and recommended actions.',
+            lilit_task_id: null,
+          },
+          crm_match: { matched: false, investor_id: null, investor_name: null, matched_on: null },
+        },
+      },
+      { upsert: true }
+    );
+
+    logger.info(
+      { signalCount: highSignals.length },
+      '[hasmik] phase 4: @chris weekly board brief saved to @artur inbox'
+    );
+  } catch (err) {
+    logger.error({ err }, '[hasmik] phase 4: @chris brief generation failed');
+  }
+}
+
 // ─── Job definition ──────────────────────────────────────────────────────────
 
 export function defineJob(agenda: Agenda): void {
@@ -1203,6 +1505,13 @@ export function defineJob(agenda: Agenda): void {
       await runFundraisingResearch(weekOf);
     } catch (err) {
       logger.error({ err }, '[hasmik] phase 3 fundraising failed');
+    }
+
+    // ── PHASE 4: @chris Weekly Board Brief ────────────────
+    try {
+      await generateWeeklyBoardBrief();
+    } catch (err) {
+      logger.error({ err }, '[hasmik] phase 4 board brief failed');
     }
 
     logger.info(

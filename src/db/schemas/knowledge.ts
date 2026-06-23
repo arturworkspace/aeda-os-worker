@@ -21,6 +21,12 @@ export interface IKnowledgeEntry extends Document {
   verificationSources: string[];
   verificationNotes: string;
   addedBy: string;
+  signalScore?: number;
+  noiseFlag?: boolean;
+  strategicImplication?: string;
+  actionRequired?: boolean;
+  arturAction?: string;
+  scoredAt?: Date;
 }
 
 const KnowledgeEntrySchema = new Schema<IKnowledgeEntry>(
@@ -45,6 +51,12 @@ const KnowledgeEntrySchema = new Schema<IKnowledgeEntry>(
     verificationSources:[{ type: String }],
     verificationNotes:  { type: String, default: '' },
     addedBy:            { type: String, default: 'hasmik' },
+    signalScore:        { type: Number, min: 1, max: 10 },
+    noiseFlag:          { type: Boolean, default: false },
+    strategicImplication: { type: String, default: '' },
+    actionRequired:     { type: Boolean, default: false },
+    arturAction:        { type: String, default: '' },
+    scoredAt:           { type: Date },
   },
   { timestamps: true }
 );
