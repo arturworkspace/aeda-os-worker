@@ -22,5 +22,20 @@ export function registerRoutes(app: Express, agenda: Agenda): void {
     }
   });
 
+  // GET version for easy browser testing
+  app.get('/jobs/hasmik-intelligence/trigger', async (_req, res) => {
+    try {
+      if (!agenda) {
+        res.status(503).json({ error: 'Agenda not initialized' });
+        return;
+      }
+      await agenda.now('hasmik.weeklyIntelligence', {});
+      res.json({ ok: true, message: 'hasmik weekly intelligence job triggered' });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ error: msg });
+    }
+  });
+
   logger.info('routes registered');
 }
