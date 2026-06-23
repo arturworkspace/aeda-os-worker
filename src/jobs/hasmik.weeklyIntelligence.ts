@@ -1051,19 +1051,26 @@ Opportunities: F6S, Seedstars, Solana Foundation grants,
       }],
       messages: [{
         role: 'user',
-        content: `Search for RECENT fintech and crypto fundraising news:
+        content: `Search for RECENT fintech fundraising AND open funding opportunities:
 
-1. Find 5-10 fintech, stablecoin, or crypto wallet startups that
-   raised funding in the LAST 30 DAYS. Include: company name,
-   amount raised, round type (pre-seed/seed/Series A/B/C),
-   lead investors, headquarters, what they do, source URL.
+PART 1 — RAISES (search fintech funding news):
+Find 5-10 fintech, stablecoin, or crypto wallet startups that
+raised funding in the LAST 30 DAYS. Include: company name,
+amount raised, round type (pre-seed/seed/Series A/B/C),
+lead investors, headquarters, what they do, source URL.
 
-2. Find 3-5 accelerator programs, grants, or funding opportunities
-   currently accepting applications that a pre-seed EU stablecoin
-   wallet startup could apply to. Include: program name, funding
-   amount, deadline, eligibility, application URL.
+PART 2 — OPEN OPPORTUNITIES (search each of these specifically):
+- "Y Combinator application deadline 2026"
+- "Techstars fintech accelerator applications open"
+- "Solana Foundation grants program"
+- "Circle Ventures grants"
+- "EIC Accelerator 2026 applications"
+- "Fintech accelerator Europe 2026"
 
-Be thorough. List everything you find with source URLs.`,
+For each opportunity found: program name, funding amount,
+application deadline, eligibility requirements, application URL.
+
+List EVERYTHING you find. Both sections are required.`,
       }],
     });
     researchText = res1.content
