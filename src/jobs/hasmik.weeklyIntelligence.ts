@@ -8,6 +8,63 @@ import { env } from '../config/env.js';
 const JOB_NAME = 'hasmik.weeklyIntelligence';
 const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
 
+// ── Fundraising Round schema (mirrors workspace model) ──────────────
+const FundraisingRoundSchema = new mongoose.Schema({
+  weekOf:          { type: Date, default: () => new Date() },
+  companyName:     String,
+  companyUrl:      { type: String, default: "" },
+  headquarters:    { type: String, default: "" },
+  category:        { type: String, default: "fintech" },
+  description:     { type: String, default: "" },
+  amount:          { type: Number, default: 0 },
+  currency:        { type: String, default: "USD" },
+  roundType:       { type: String, default: "seed" },
+  announcedDate:   { type: String, default: "" },
+  valuation:       { type: Number, default: 0 },
+  investors:       [{
+    name:            { type: String, default: "" },
+    firm:            { type: String, default: "" },
+    website:         { type: String, default: "" },
+    geography:       { type: String, default: "" },
+    stagePreference: { type: String, default: "" },
+    checkSize:       { type: String, default: "" },
+    addedToCRM:      { type: Boolean, default: false },
+  }],
+  relevanceToAeda: { type: String, default: "" },
+  sourceUrl:       { type: String, default: "" },
+  addedBy:         { type: String, default: "hasmik" },
+}, { timestamps: true, collection: 'fundraisingrounds' });
+
+const FundraisingRoundModel =
+  mongoose.models['FundraisingRound'] ??
+  mongoose.model('FundraisingRound', FundraisingRoundSchema);
+
+// ── Funding Opportunity schema ───────────────────────────────────────
+const FundingOpportunitySchema = new mongoose.Schema({
+  weekOf:               { type: Date, default: () => new Date() },
+  programName:          String,
+  website:              { type: String, default: "" },
+  applicationUrl:       { type: String, default: "" },
+  type:                 { type: String, default: "accelerator" },
+  description:          { type: String, default: "" },
+  fundingAmount:        { type: String, default: "" },
+  equityRequired:       { type: String, default: "" },
+  deadline:             { type: String, default: "" },
+  geography:            [String],
+  stageRequirements:    { type: String, default: "" },
+  isAedaEligible:       { type: Boolean, default: false },
+  eligibilityReasoning: { type: String, default: "" },
+  recommendedAction:    { type: String, default: "" },
+  priority:             { type: String, default: "Medium" },
+  sourceUrl:            { type: String, default: "" },
+  addedBy:              { type: String, default: "hasmik" },
+  status:               { type: String, default: "open" },
+}, { timestamps: true, collection: 'fundingopportunities' });
+
+const FundingOpportunityModel =
+  mongoose.models['FundingOpportunity'] ??
+  mongoose.model('FundingOpportunity', FundingOpportunitySchema);
+
 // ─── Org intelligence domains ────────────────────────────────────────────────
 
 const ORG_DOMAINS = [
@@ -608,6 +665,268 @@ async function saveSignal(opts: {
   await doc.save();
 }
 
+// ─── Fundraising Research ────────────────────────────────────────────────────
+
+async function runFundraisingResearch(weekOf: Date): Promise<void> {
+  logger.info('[hasmik] phase 3: fundraising intelligence');
+
+  const FUNDRAISING_SYSTEM = `You are @hasmik, Research & Intelligence Agent at aeda.
+aeda is a pre-seed non-custodial EURC stablecoin wallet
+(EU-Armenia corridor, Prague, Czech Republic).
+Raising $500K at $5M pre-money valuation.
+
+Your job: find genuine fundraising news from this week.
+
+RELEVANT CATEGORIES for aeda:
+stablecoins, cross-border payments, embedded wallets,
+wallet infrastructure, BaaS, compliance/KYC, crypto infrastructure,
+AI+payments, remittances, Solana ecosystem, EU fintech.
+
+WHAT TO SEARCH FOR:
+1. Fintech/stablecoin startups that raised funding THIS WEEK
+2. Open accelerator programs, grants, ecosystem funds
+   that aeda could apply to
+
+aeda profile for eligibility assessment:
+- Pre-seed stage, $500K target, $5M pre-money
+- EU registered (Czech Republic), operating Armenia corridor
+- Non-custodial EURC wallet (NOT a payment institution)
+- Stack: Solana, NestJS, Flutter
+- Partners: Bridge.xyz, Sky Labs, Sumsub
+- MiCA compliant technology network
+
+SOURCES TO CHECK:
+Raises: TechCrunch, The Block, Fortune Crypto, Axios Pro Rata,
+        Crunchbase News, Bloomberg Crypto, EU-Startups,
+        Sifted (EU fintech), The Information
+
+Opportunities: F6S, Seedstars, EIC Accelerator,
+               Solana Foundation grants, Circle grants,
+               Techstars Fintech, Y Combinator,
+               Startup Lithuania, CzechInvest,
+               EU Horizon grants, Fintech Lithuania`;
+
+  // Step 1: Research
+  let researchText = "";
+  try {
+    const res1 = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2000,
+      system: FUNDRAISING_SYSTEM,
+      tools: [{
+        type: 'web_search_20250305' as const,
+        name: 'web_search' as const,
+        max_uses: 5,
+      }],
+      messages: [{
+        role: 'user',
+        content: `Search for:
+1. Fintech, stablecoin, and crypto wallet startups that raised
+   funding THIS WEEK (last 7 days). Include: company name,
+   amount, round type, investors, headquarters, what they do.
+
+2. Open accelerator programs, grants, and funding opportunities
+   currently accepting applications that aeda (pre-seed EU
+   non-custodial stablecoin wallet) could apply to.
+
+For every item found, include the exact source URL.
+Write in detailed prose with all facts included.`,
+      }],
+    });
+    researchText = res1.content
+      .filter(b => b.type === 'text')
+      .map(b => (b as { type: 'text'; text: string }).text)
+      .join('\n').trim();
+  } catch (err) {
+    logger.error({ err }, '[hasmik] fundraising research step 1 failed');
+    return;
+  }
+
+  if (!researchText || researchText.length < 100) {
+    logger.info('[hasmik] no fundraising content found this week');
+    return;
+  }
+
+  // Step 2: Structure
+  let structured: {
+    rounds: Array<{
+      companyName: string;
+      companyUrl: string;
+      headquarters: string;
+      category: string;
+      description: string;
+      amount: number;
+      currency: string;
+      roundType: string;
+      announcedDate: string;
+      valuation: number;
+      investors: Array<{
+        name: string;
+        firm: string;
+        website: string;
+        geography: string;
+        stagePreference: string;
+        checkSize: string;
+      }>;
+      relevanceToAeda: string;
+      sourceUrl: string;
+    }>;
+    opportunities: Array<{
+      programName: string;
+      website: string;
+      applicationUrl: string;
+      type: string;
+      description: string;
+      fundingAmount: string;
+      equityRequired: string;
+      deadline: string;
+      geography: string[];
+      stageRequirements: string;
+      isAedaEligible: boolean;
+      eligibilityReasoning: string;
+      recommendedAction: string;
+      priority: string;
+      sourceUrl: string;
+    }>;
+  } = { rounds: [], opportunities: [] };
+
+  try {
+    const res2 = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 2000,
+      system: `Convert research into structured JSON.
+Output ONLY valid JSON, no markdown.
+
+JSON format:
+{
+  "rounds": [
+    {
+      "companyName": "string",
+      "companyUrl": "string",
+      "headquarters": "string (city, country)",
+      "category": "stablecoin|wallet|payments|compliance|ai-fintech|crypto-infra|other",
+      "description": "max 80 words what they do",
+      "amount": 5000000,
+      "currency": "USD",
+      "roundType": "pre-seed|seed|series-a|series-b|series-c|other",
+      "announcedDate": "YYYY-MM-DD",
+      "valuation": 0,
+      "investors": [
+        {
+          "name": "Partner name (if known)",
+          "firm": "Fund name",
+          "website": "fund website URL",
+          "geography": "US|EU|Global|etc",
+          "stagePreference": "pre-seed|seed|series-a|etc",
+          "checkSize": "$250K-$2M"
+        }
+      ],
+      "relevanceToAeda": "1-2 sentences: why this is relevant to aeda",
+      "sourceUrl": "exact article URL"
+    }
+  ],
+  "opportunities": [
+    {
+      "programName": "string",
+      "website": "program website URL",
+      "applicationUrl": "direct application URL",
+      "type": "accelerator|grant|incubator|studio|ecosystem-fund",
+      "description": "max 60 words",
+      "fundingAmount": "$150K or range",
+      "equityRequired": "7% or None",
+      "deadline": "YYYY-MM-DD or Rolling or unknown",
+      "geography": ["EU", "Global"],
+      "stageRequirements": "pre-seed, seed",
+      "isAedaEligible": true,
+      "eligibilityReasoning": "why aeda is or is not eligible",
+      "recommendedAction": "concrete next step for aeda",
+      "priority": "High|Medium|Low",
+      "sourceUrl": "exact URL"
+    }
+  ]
+}
+
+Rules:
+- Only include raises with confirmed source URLs
+- Only include opportunities currently accepting applications
+- Max 8 rounds, max 5 opportunities
+- If nothing found for a section, return empty array []`,
+      messages: [{
+        role: 'user',
+        content: `Structure this into JSON:\n\n${researchText}`,
+      }],
+    });
+
+    const raw = res2.content[0]?.type === 'text'
+      ? res2.content[0].text.trim() : '';
+
+    // Brace matching JSON extraction
+    const start = raw.indexOf('{');
+    if (start !== -1) {
+      let depth = 0, end = -1;
+      for (let i = start; i < raw.length; i++) {
+        if (raw[i] === '{') depth++;
+        else if (raw[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+      }
+      if (end !== -1) {
+        structured = JSON.parse(raw.slice(start, end + 1));
+      }
+    }
+  } catch (err) {
+    logger.error({ err }, '[hasmik] fundraising structure step failed');
+    return;
+  }
+
+  // Save rounds
+  let savedRounds = 0;
+  for (const round of (structured.rounds ?? [])) {
+    try {
+      if (!round.companyName) continue;
+      const doc = new FundraisingRoundModel({
+        ...round,
+        weekOf,
+        addedBy: 'hasmik',
+      });
+      await doc.save();
+      savedRounds++;
+    } catch (err) {
+      logger.error({ err, company: round.companyName },
+        '[hasmik] failed to save round');
+    }
+  }
+
+  // Save opportunities
+  let savedOpps = 0;
+  for (const opp of (structured.opportunities ?? [])) {
+    try {
+      if (!opp.programName) continue;
+      // Check if already exists (avoid duplicates)
+      const exists = await (FundingOpportunityModel as mongoose.Model<unknown>).findOne({
+        programName: opp.programName,
+        status: 'open',
+      }).exec();
+      if (!exists) {
+        const doc = new FundingOpportunityModel({
+          ...opp,
+          weekOf,
+          addedBy: 'hasmik',
+          status: 'open',
+        });
+        await doc.save();
+        savedOpps++;
+      }
+    } catch (err) {
+      logger.error({ err, program: opp.programName },
+        '[hasmik] failed to save opportunity');
+    }
+  }
+
+  logger.info(
+    { savedRounds, savedOpps },
+    '[hasmik] phase 3 fundraising intelligence complete'
+  );
+}
+
 // ─── Job definition ──────────────────────────────────────────────────────────
 
 export function defineJob(agenda: Agenda): void {
@@ -733,6 +1052,14 @@ export function defineJob(agenda: Agenda): void {
       logger.info('[hasmik] master brief written to artur inbox');
     } catch (err) {
       logger.error({ err }, '[hasmik] failed to write master brief to inbox');
+    }
+
+    // ── PHASE 3: Fundraising Intelligence ────────────────
+    try {
+      const weekOf = new Date();
+      await runFundraisingResearch(weekOf);
+    } catch (err) {
+      logger.error({ err }, '[hasmik] phase 3 fundraising failed');
     }
 
     logger.info(
