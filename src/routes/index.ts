@@ -9,8 +9,10 @@ export function registerRoutes(app: Express, agenda: Agenda): void {
 
   // Manual trigger for hasmik weekly intelligence job (protected by secret)
   app.post('/jobs/hasmik-intelligence/trigger', (req, res, next) => {
-    const secret = req.headers['x-trigger-secret'];
-    if (secret !== process.env['TRIGGER_SECRET']) {
+    const provided = req.headers['x-trigger-secret'];
+    const expected = process.env['TRIGGER_SECRET'];
+    // Reject if no secret configured OR if provided doesn't match
+    if (!expected || provided !== expected) {
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
