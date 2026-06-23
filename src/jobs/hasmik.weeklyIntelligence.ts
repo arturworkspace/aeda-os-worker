@@ -1111,14 +1111,14 @@ Be thorough. List everything you find with source URLs.`,
     }>;
     opportunities: Array<{
       programName: string;
-      website: string;
-      applicationUrl: string;
       type: string;
+      provider: string;
       description: string;
       fundingAmount: string;
-      equityRequired: string;
       deadline: string;
-      geography: string[];
+      applicationUrl: string;
+      website: string;
+      geography: string | string[];
       stageRequirements: string;
       isAedaEligible: boolean;
       eligibilityReasoning: string;
@@ -1132,7 +1132,8 @@ Be thorough. List everything you find with source URLs.`,
     const res2 = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 3000,
-      system: `You are a structured data extractor. Return ONLY valid JSON. No markdown, no explanation, no backticks.`,
+      system: `You are a structured data extractor. Return ONLY valid JSON. No markdown, no explanation, no backticks.
+eligibilityReasoning and recommendedAction are REQUIRED fields for opportunities. Never leave them empty. If unsure about eligibility, explain why.`,
       messages: [{
         role: 'user',
         content: `Extract all fundraising rounds and opportunities from this research.
@@ -1152,12 +1153,19 @@ Return JSON with this exact structure:
   ],
   "opportunities": [
     {
-      "programName": "Program Name",
-      "fundingAmount": "$50K-$150K",
-      "deadline": "Rolling",
-      "website": "https://...",
+      "programName": "Full program name",
+      "type": "accelerator | grant | competition | government",
+      "provider": "Organisation name",
+      "description": "2-3 sentences on what it offers",
+      "fundingAmount": "€50K or equity-free etc",
+      "deadline": "Month Year or Rolling",
+      "applicationUrl": "https://direct-application-url.com",
+      "geography": "EU / Global / Eastern Europe etc",
+      "stageRequirements": "Pre-seed / Seed / Any",
       "isAedaEligible": true,
-      "description": "What the program offers"
+      "eligibilityReasoning": "REQUIRED: 1-2 sentences explaining WHY aeda qualifies or does not qualify. aeda is a non-custodial EURC stablecoin wallet for EU-Armenia corridor, Prague entity (VanCoin LLC), pre-seed stage, raising €500K. Be specific.",
+      "recommendedAction": "REQUIRED: one concrete action e.g. Apply before [date], Register interest now, Watch for next cohort, Skip — not relevant",
+      "priority": "High | Medium | Low"
     }
   ]
 }
