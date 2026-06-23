@@ -1005,72 +1005,143 @@ async function runFundraisingResearch(weekOf: Date): Promise<void> {
   logger.info('[hasmik] phase 3: fundraising intelligence');
 
   const FUNDRAISING_SYSTEM = `You are @hasmik, Research & Intelligence Agent at aeda.
-aeda is a pre-seed non-custodial EURC stablecoin wallet
-(EU-Armenia corridor, Prague, Czech Republic).
-Raising $500K at $5M pre-money valuation.
-
-Your job: find genuine fundraising news from the LAST 30 DAYS.
-
-RELEVANT CATEGORIES for aeda:
-stablecoins, cross-border payments, embedded wallets,
-wallet infrastructure, BaaS, compliance/KYC, crypto infrastructure,
-AI+payments, remittances, Solana ecosystem, fintech.
-
-WHAT TO SEARCH FOR:
-1. Fintech, stablecoin, crypto wallet startups that raised funding
-   (pre-seed, seed, Series A, Series B, Series C) in last 30 days
-2. Open accelerator programs, grants, ecosystem funds
-   that aeda could apply to
-
-aeda profile for eligibility assessment:
-- Pre-seed stage, $500K target, $5M pre-money
-- EU registered (Czech Republic), operating Armenia corridor
-- Non-custodial EURC wallet (NOT a payment institution)
-- Stack: Solana, NestJS, Flutter
-- Partners: Bridge.xyz, Sky Labs, Sumsub
-- MiCA compliant technology network
-
-SOURCES TO CHECK:
-Raises: TechCrunch, The Block, Fortune Crypto, Crunchbase News,
-        EU-Startups, Sifted, CoinDesk, Decrypt
-
-Opportunities: F6S, Seedstars, Solana Foundation grants,
-               Circle grants, Techstars, Y Combinator`;
+Your job: research active funding opportunities and recent raises.`;
 
   // Step 1: Research
   let researchText = "";
   try {
     const res1 = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 2000,
+      max_tokens: 4000,
       system: FUNDRAISING_SYSTEM,
       tools: [{
         type: 'web_search_20250305' as const,
         name: 'web_search' as const,
-        max_uses: 5,
+        max_uses: 10,
       }],
       messages: [{
         role: 'user',
-        content: `Search for RECENT fintech fundraising AND open funding opportunities:
+        content: `You are researching active funding opportunities for aeda.
 
-PART 1 — RAISES (search fintech funding news):
-Find 5-10 fintech, stablecoin, or crypto wallet startups that
-raised funding in the LAST 30 DAYS. Include: company name,
-amount raised, round type (pre-seed/seed/Series A/B/C),
-lead investors, headquarters, what they do, source URL.
+ABOUT aeda:
+- VanCoin LLC, Prague, Czech Republic (EU entity, IČO 21204161)
+- Non-custodial EURC stablecoin wallet for EU-Armenia corridor
+- Pre-seed stage, raising €500K at €5M pre-money
+- 3 co-founders, NestJS + Flutter + Solana stack
+- Partners: Bridge.xyz, Sky Labs, Sumsub, Circle (EURC issuer)
+- Regulatory position: technology network, NOT a CASP/VASP/EMI
 
-PART 2 — OPEN OPPORTUNITIES (search each of these specifically):
-- "Y Combinator application deadline 2026"
-- "Techstars fintech accelerator applications open"
-- "Solana Foundation grants program"
-- "Circle Ventures grants"
-- "EIC Accelerator 2026 applications"
-- "Fintech accelerator Europe 2026"
+Run a SEPARATE web search for EACH of the 8 categories below.
+Both RAISES and OPPORTUNITIES sections are REQUIRED.
 
-For each opportunity found: program name, funding amount,
-application deadline, eligibility requirements, application URL.
+---
 
-List EVERYTHING you find. Both sections are required.`,
+SEARCH 1 — EU / EECA fintech accelerator programs open 2026
+Query: "EU fintech accelerator 2026 applications open"
+Check specifically:
+  Startup Wise Guys — EECA-specialist accelerator (Tallinn)
+  Tenity VC — fintech accelerator (Zurich + Tallinn)
+  CommerzVentures / Commerzbank Main Incubator — Frankfurt
+  500 Emerging Europe — Eastern Europe focused fund/program
+  Accelerace — Copenhagen, Nordic/EU accelerator
+  Bethnal Green Ventures — London, fintech/impact focus
+  Entrepreneurs First (EF) — talent-first program, London/global
+  Presto Ventures — Prague Czech seed VC
+  J&T Ventures — Prague Czech VC
+
+SEARCH 2 — US fintech accelerators open to EU startups 2026
+Query: "US fintech accelerator 2026 EU startups applications"
+Check specifically:
+  Y Combinator — S26/W27 batch open?
+  Techstars — Barclays Techstars fintech, Citi Ventures program
+  Plug and Play Tech Center — FinTech vertical
+  500 Global (500.co) — fintech track
+  MassChallenge FinTech — Boston
+  FinTech Innovation Lab — NYC (Accenture)
+  Visa Everywhere Initiative 2026
+  Mastercard Start Path — payments cohort
+
+SEARCH 3 — Web3 / stablecoin ecosystem grants and programs 2026
+Query: "stablecoin web3 startup grant program 2026 open"
+Check specifically:
+  Circle ecosystem programs — EURC builder grants?
+  Solana Foundation grants — consumer payment apps?
+  Stellar Community Fund — cross-border payments focus
+  Algorand Foundation — payment apps grants?
+  Uniswap Foundation — stablecoin UX grants?
+  Aptos Foundation — ecosystem grants?
+  Polkadot Treasury / Web3 Foundation
+  NEAR Foundation — ecosystem grants?
+  Cosmos / Interchain Foundation
+
+SEARCH 4 — Web3 VC programs and portfolio programs 2026
+Query: "a16z crypto accelerator web3 startup program 2026"
+Check specifically:
+  a16z crypto Startup School — 2026 cohort?
+  Paradigm — builder programs or residencies?
+  Pantera Capital — ecosystem programs?
+  Multicoin Capital — ecosystem grants?
+  1kx (Berlin) — EU-based crypto VC programs?
+  RockawayX (Zurich) — EU crypto programs?
+  CV VC (Zug) — Swiss blockchain programs?
+  Maven 11 Capital (Amsterdam) — EU crypto programs?
+
+SEARCH 5 — EU non-dilutive grants and government programs 2026
+Query: "EU fintech non-dilutive grant payments startup 2026"
+Check specifically:
+  EIC Accelerator — Czech Republic eligible, H2 2026 calls?
+  Horizon Europe — Digital Finance / payments research calls?
+  Digital Europe Programme — fintech/payments strand?
+  CzechInvest — Czech startup grant programs 2026?
+  Czech-Moravian Guarantee Bank (ČMZRB) — fintech programs?
+  EIF / InvestEU — equity instruments for Czech startups?
+
+SEARCH 6 — Payments / cross-border programs 2026
+Query: "cross-border payments startup accelerator 2026"
+Check specifically:
+  SWIFT Innotribe — 2026 startup challenge?
+  BIS Innovation Hub — fintech programs for EU startups?
+  Mouro Capital (Santander) — fintech programs?
+  Illuminate Financial (London) — fintech cohorts?
+  IFC / World Bank — EECA fintech support programs?
+
+SEARCH 7 — Armenia / EECA corridor programs 2026
+Query: "Armenia fintech startup program 2026"
+Check specifically:
+  FAST Foundation Armenia
+  Armenia Innovation Foundation (AIF)
+  USAID ADVANCE Armenia — fintech/payments track?
+  Granatus Ventures — Armenia VC programs?
+  EBRD — EECA fintech startup support 2026?
+
+SEARCH 8 — Cross-check recent program announcements
+Query: "fintech stablecoin payments accelerator opened applications 2026"
+Look for ANY programs announced in last 90 days accepting
+EU-based pre-seed fintech/stablecoin startups.
+
+---
+
+For EACH opportunity found confirm:
+  - Status: OPEN or opening within 90 days (ignore closed)
+  - Deadline (exact date or "Rolling")
+  - Equity: dilutive % OR non-dilutive grant
+  - Geography: accepts Czech/EU entities?
+  - Amount: funding or investment offered
+  - Application URL
+
+Assess aeda eligibility based on:
+  EU entity (Czech) ✓ | Pre-seed ✓ | Solana/EURC ✓
+  Payments/cross-border ✓ | Non-custodial ✓
+  If US entity required: note as structural condition
+
+Priority: High = deadline <60 days + direct fit
+          Medium = deadline 60-180 days OR adjacent fit
+          Low = rolling deadline OR indirect fit
+
+Target: 5-10 opportunities total.
+
+Also search for recent fintech/stablecoin/crypto raises in last 30 days
+for competitive intelligence. Include company, amount, round, investors.`,
       }],
     });
     researchText = res1.content
