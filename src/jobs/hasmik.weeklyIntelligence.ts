@@ -15,10 +15,71 @@ const ORG_DOMAINS = [
     id: 'regulation',
     category: 'regulation',
     relevantAgents: ['narek', 'vagho', 'arshak', 'artur'],
-    searchFocus: `EU fintech regulation: MiCA implementation updates, EBA/ESMA guidance,
-      Czech NBÚ or CNB fintech regulatory news, DORA compliance updates,
-      AML/KYC regulation changes, stablecoin/EMT regulatory developments in EU.
-      Focus on what changed THIS WEEK that is actionable for a non-custodial EURC wallet startup.`,
+    searchFocus: `Scan these regulatory sources for aeda-relevant
+      updates this week. aeda is a non-custodial EURC stablecoin
+      wallet (EU-Armenia corridor, Prague, Czech Republic).
+      Focus on: stablecoins, EMT, MiCA, AML/KYC, CASP,
+      Travel Rule, blockchain/DLT regulation.
+      IMPORTANT: For every signal, include the exact source URL.
+
+      TIER 1A — EU PRIMARY REGULATORS:
+      - EBA (eba.europa.eu) — MiCA implementation, stablecoin/EMT
+        guidance, CASP requirements, AML updates, Q&As, Guidelines
+      - ESMA (esma.europa.eu) — MiCA technical standards,
+        CASP oversight, crypto-assets regulation
+      - European Commission Digital Finance
+        (finance.ec.europa.eu/digital-finance_en) —
+        new legislative proposals, Digital Finance Package updates
+      - ECB (ecb.europa.eu) — stablecoin policy, Digital Euro,
+        payments infrastructure future
+      - Czech National Bank / CNB (cnb.cz) — MiCA interpretation
+        for Czech entities, crypto licensing, fintech regulatory updates
+      - Central Bank of Armenia / CBA (cba.am) — Armenian fintech
+        policy, sandbox initiatives, AML/KYC rule changes
+
+      TIER 1B — USA REGULATORS (global stablecoin precedent):
+      - SEC (sec.gov) — crypto asset securities classification,
+        stablecoin enforcement, exchange regulation
+      - CFTC (cftc.gov) — crypto derivatives, stablecoin commodity
+        classification, enforcement against payment protocols
+      - FinCEN (fincen.gov) — AML/BSA for crypto, Travel Rule
+        enforcement, non-custodial wallet guidance
+      - OCC (occ.gov) — bank crypto custody, stablecoin reserve
+        requirements, fintech charter updates
+      - Federal Reserve (federalreserve.gov) — stablecoin
+        legislation, CBDC research, payment system oversight
+      - CFPB (consumerfinance.gov) — digital wallet consumer
+        protection, payment app regulation, open banking
+      NOTE: Circle (EURC issuer) is US-based — US regulatory
+      shifts directly affect EURC compliance and availability.
+
+      TIER 2 — AML / COMPLIANCE:
+      - FATF (fatf-gafi.org) — Travel Rule updates, Virtual Assets
+        guidance, AML international standards
+      - Moneyval (coe.int/moneyval) — Armenia AML assessments,
+        European AML evaluation reports
+
+      TIER 3 — MARKET INTELLIGENCE:
+      - The Paypers (thepaypers.com) — payments regulation,
+        stablecoins, open banking, fintech compliance
+      - Finextra (finextra.com) — banking, wallets, CBDC, stablecoins
+      - CoinDesk Policy (coindesk.com/policy) — crypto regulation
+      - DL News (dlnews.com) — MiCA, stablecoins, Circle, Revolut
+      - Circle Policy Hub — EURC/USDC regulatory changes
+      - Fireblocks Blog (fireblocks.com/blog) — institutional crypto
+      - Chainalysis Blog (chainalysis.com/blog) — AML, sanctions
+
+      PRIORITY FLAGS (always report with source URL):
+      - Any EBA/ESMA guidance on non-custodial wallets
+      - CNB statement on MiCA licensing in Czech Republic
+      - CBA sandbox or fintech licensing update in Armenia
+      - FATF Travel Rule threshold changes
+      - Digital Euro update affecting EURC positioning
+      - USA stablecoin legislation advancing (GENIUS Act, STABLE Act)
+      - SEC/CFTC enforcement against stablecoin wallet or payment app
+      - FinCEN guidance on Travel Rule for non-custodial wallets
+      - Circle facing any US regulatory action
+      - Any enforcement action against stablecoin wallet in EU/USA`,
   },
   {
     id: 'technology',
