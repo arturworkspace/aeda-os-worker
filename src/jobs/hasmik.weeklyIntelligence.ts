@@ -1258,10 +1258,92 @@ Rules:
   );
 }
 
-// ─── Phase 4: @chris Weekly Board Brief ─────────────────────────────────────
+// ─── Phase 4A: Score unscored entries ────────────────────────────────────────
+
+async function scoreUnscoredEntries(): Promise<{ scoredCount: number; highScoreCount: number }> {
+  logger.info('[hasmik] phase 4a: scoring unscored entries');
+
+  // Find all entries with null signalScore
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const unscoredEntries: any[] = await (KnowledgeEntryModel as any).find({
+    status: 'active',
+    addedBy: 'hasmik',
+    $or: [
+      { signalScore: null },
+      { signalScore: { $exists: false } },
+    ],
+  })
+    .limit(100) // Process in batches to avoid timeout
+    .exec();
+
+  if (unscoredEntries.length === 0) {
+    logger.info('[hasmik] phase 4a: no unscored entries found');
+    return { scoredCount: 0, highScoreCount: 0 };
+  }
+
+  logger.info({ count: unscoredEntries.length }, '[hasmik] phase 4a: found unscored entries');
+
+  let scoredCount = 0;
+  let highScoreCount = 0;
+
+  for (const entry of unscoredEntries) {
+    try {
+      const scoring = await scoreSignal({
+        title: entry.title || '',
+        summary: entry.summary || '',
+        category: entry.category || 'general',
+        sourceUrl: entry.source || '',
+        trustLevel: entry.trustLevel || 'signal',
+        verificationStatus: entry.verificationStatus || 'unverifiable',
+      });
+
+      // Validate score
+      const score = scoring.signalScore;
+      if (typeof score !== 'number' || isNaN(score) || score < 1 || score > 10) {
+        logger.warn({ entryId: entry._id, rawScore: score }, '[hasmik] invalid score, skipping');
+        continue;
+      }
+
+      // Update the entry with $set
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (KnowledgeEntryModel as any).findByIdAndUpdate(entry._id, {
+        $set: {
+          signalScore: score,
+          noiseFlag: scoring.noiseFlag,
+          strategicImplication: scoring.strategicImplication,
+          actionRequired: scoring.actionRequired,
+          arturAction: scoring.arturAction,
+          scoredAt: new Date(),
+        },
+      });
+
+      scoredCount++;
+      if (score >= 6) highScoreCount++;
+
+      logger.info(
+        { entryId: entry._id, title: entry.title?.slice(0, 40), score },
+        '[hasmik] entry scored'
+      );
+
+      // Rate limit protection
+      await sleep(500);
+    } catch (err) {
+      logger.error({ err, entryId: entry._id }, '[hasmik] failed to score entry');
+    }
+  }
+
+  logger.info(
+    { scoredCount, highScoreCount },
+    '[hasmik] phase 4a complete: scored entries'
+  );
+
+  return { scoredCount, highScoreCount };
+}
+
+// ─── Phase 4B: @chris Weekly Board Brief ─────────────────────────────────────
 
 async function generateWeeklyBoardBrief(): Promise<void> {
-  logger.info('[hasmik] phase 4: @chris weekly board brief');
+  logger.info('[hasmik] phase 4b: generating @chris weekly board brief');
 
   // Get this week's high-score signals (score >= 6)
   const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -1277,9 +1359,14 @@ async function generateWeeklyBoardBrief(): Promise<void> {
     .exec();
 
   if (highSignals.length === 0) {
-    logger.info('[hasmik] phase 4: no high-score signals this week, skipping brief');
+    logger.info('[hasmik] phase 4b: no high-score signals (score >= 6) this week, skipping board brief');
     return;
   }
+
+  logger.info(
+    { highSignalCount: highSignals.length },
+    '[hasmik] phase 4b: found high-score signals for board brief'
+  );
 
   const signalSummaries = highSignals.map((s: any, i: number) =>
     `${i + 1}. [Score ${s.signalScore}] ${s.title}\n   ${s.summary}\n   Strategic: ${s.strategicImplication || 'N/A'}`
@@ -1365,7 +1452,7 @@ Keep it sharp. No filler. CEOs read fast.`;
 
     logger.info(
       { signalCount: highSignals.length },
-      '[hasmik] phase 4: @chris weekly board brief saved to @artur inbox'
+      '[hasmik] phase 4b: Board brief written to @artur inbox'
     );
   } catch (err) {
     logger.error({ err }, '[hasmik] phase 4: @chris brief generation failed');
@@ -1507,11 +1594,22 @@ export function defineJob(agenda: Agenda): void {
       logger.error({ err }, '[hasmik] phase 3 fundraising failed');
     }
 
-    // ── PHASE 4: @chris Weekly Board Brief ────────────────
+    // ── PHASE 4A: Score unscored entries ────────────────
+    try {
+      const { scoredCount, highScoreCount } = await scoreUnscoredEntries();
+      logger.info(
+        { scoredCount, highScoreCount },
+        '[hasmik] Phase 4A complete'
+      );
+    } catch (err) {
+      logger.error({ err }, '[hasmik] phase 4a scoring failed');
+    }
+
+    // ── PHASE 4B: @chris Weekly Board Brief ────────────────
     try {
       await generateWeeklyBoardBrief();
     } catch (err) {
-      logger.error({ err }, '[hasmik] phase 4 board brief failed');
+      logger.error({ err }, '[hasmik] phase 4b board brief failed');
     }
 
     logger.info(
