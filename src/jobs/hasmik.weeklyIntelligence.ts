@@ -85,10 +85,121 @@ const ORG_DOMAINS = [
     id: 'technology',
     category: 'technology',
     relevantAgents: ['hamazasp', 'anna', 'vagho', 'artur'],
-    searchFocus: `Solana blockchain updates (performance, fees, outages, new features),
-      Circle EURC ecosystem news, Bridge.xyz API updates, Sumsub KYC platform updates,
-      Helius RPC updates, Anthropic Claude API changes, Railway platform updates.
-      Focus on what changed THIS WEEK relevant to a NestJS/Flutter/Solana stack.`,
+    searchFocus: `Search for OFFICIAL engineering and infrastructure
+      updates this week. aeda stack: NestJS, Flutter, Solana,
+      MongoDB, AWS, Railway, Vercel, Anthropic API.
+
+      MANDATORY: Every signal must include the exact official
+      source URL (changelog, release notes, official blog,
+      GitHub release). No unofficial sources.
+
+      SOURCES TO CHECK (official only):
+      - Solana (solana.com/news, github.com/solana-labs,
+        solana.com/developers/changelog) —
+        protocol updates, TPS, fee changes, outages,
+        new validator features, RPC changes
+      - Helius (helius.dev/blog) — RPC updates,
+        new APIs, webhook changes
+      - Anthropic (anthropic.com/news, docs.anthropic.com/changelog) —
+        Claude API changes, new models, pricing,
+        new capabilities, MCP updates
+      - Railway (railway.app/changelog) —
+        platform updates, pricing, new regions, features
+      - Vercel (vercel.com/changelog) —
+        Next.js updates, edge functions, deployment changes
+      - NestJS (github.com/nestjs/nest/releases) —
+        framework releases, breaking changes
+      - Flutter (flutter.dev/docs/release/release-notes) —
+        SDK releases, breaking changes, new APIs
+      - MongoDB (mongodb.com/blog/channel/products) —
+        Atlas updates, driver changes, new features
+      - AWS (aws.amazon.com/new, aws.amazon.com/blogs) —
+        ECS, S3, relevant service updates
+      - Cloudflare (blog.cloudflare.com) —
+        Workers, R2, Email Routing updates
+      - Node.js (nodejs.org/en/blog) —
+        LTS releases, security patches
+
+      PRIORITY FLAGS:
+      - Any Solana outage or major performance issue
+      - Anthropic API breaking change or deprecation
+      - Security vulnerability in any stack component
+      - Railway pricing or plan change
+      - Helius RPC API change affecting our integration`,
+  },
+  {
+    id: 'product',
+    category: 'technology',
+    relevantAgents: ['laura', 'artur', 'narek', 'arshak', 'chris', 'hamazasp'],
+    searchFocus: `Search for OFFICIAL product news and infrastructure
+      announcements relevant to building a non-custodial EURC
+      stablecoin wallet (EU-Armenia corridor).
+
+      MANDATORY: Every signal must include the exact official
+      source URL (official blog, press release, official announcement,
+      changelog). No unofficial or secondary sources.
+
+      SOURCES TO CHECK (official announcements only):
+
+      EMBEDDED WALLET INFRASTRUCTURE:
+      - Privy (privy.io/blog) — wallet SDK updates, new features
+      - Turnkey (turnkey.com/blog) — MPC wallet updates
+      - Dynamic (dynamic.xyz/blog) — embedded wallet features
+      - Crossmint (crossmint.com/blog) — wallet-as-a-service updates
+      - Coinbase Developer Platform (docs.cdp.coinbase.com/changelog)
+      - DFNS (dfns.co/blog) — institutional wallet updates
+      - Fireblocks (fireblocks.com/blog) — custody infrastructure
+
+      STABLECOIN INFRASTRUCTURE:
+      - Circle (circle.com/blog, developers.circle.com/changelog) —
+        EURC/USDC updates, new APIs, new countries, policy changes
+      - Bridge (bridge.xyz/blog) — new corridors, API updates,
+        pricing changes, country support
+      - BVNK (bvnk.com/blog) — stablecoin payment updates
+      - Paxos (paxos.com/newsroom) — stablecoin infrastructure
+      - Stripe (stripe.com/newsroom, stripe.com/blog) —
+        stablecoin product updates, payment features
+
+      ONRAMP / OFFRAMP:
+      - Transak (transak.com/blog) — new country support,
+        new payment methods, fee changes
+      - Ramp Network (ramp.network/blog) — new corridors, features
+      - MoonPay (moonpay.com/blog) — new features, country support
+      - Sardine (sardine.ai/blog) — fraud/KYC updates
+      - Mercuryo (mercuryo.io/blog) — new corridors, payment methods
+      - Kado (kado.money/blog) — stablecoin onramp updates
+
+      CROSS-BORDER PAYMENTS:
+      - Conduit (getconduit.app/blog) — stablecoin payouts
+      - Mural Pay (muralpay.com/blog) — treasury/payouts
+      - Arf (arf.one/blog) — cross-border stablecoin
+
+      COMPLIANCE / KYC:
+      - Sumsub (sumsub.com/blog) — KYC/AML updates, new features,
+        new country support, pricing changes
+      - Chainalysis (chainalysis.com/blog) — AML/compliance tools
+      - TRM Labs (trmlabs.com/blog) — blockchain intelligence
+
+      WALLET TRENDS:
+      - Phantom (phantom.app/blog) — UX innovations, new features
+      - Safe (safe.global/blog) — smart wallet updates
+      - Coinbase Wallet (coinbase.com/blog) — smart wallet features
+      - Argent (argent.xyz/blog) — wallet UX, account abstraction
+
+      AI + FINANCE:
+      - Any official announcement of AI agent + payments integration
+      - Any stablecoin + AI infrastructure startup funding announcement
+        from TechCrunch, Bloomberg, or official company blog
+
+      PRIORITY FLAGS (always report with source URL):
+      - Circle announcing new EURC country support or API change
+      - Bridge.xyz adding Armenia or EECA corridor
+      - Sumsub pricing or policy change affecting our KYC integration
+      - Any embedded wallet provider adding Solana support
+      - Any competitor (Rizon, Sling, Parsek, PEXX) raising funding
+        or launching in Europe (official source only)
+      - Any new stablecoin wallet launching in EU with regulatory approval
+      - Transak or Ramp adding Armenia onramp support`,
   },
   {
     id: 'market',
@@ -162,7 +273,18 @@ const AGENT_DOMAINS = [
   {
     agentId: 'hamazasp',
     category: 'technology',
-    domain: 'Solana v2 changelog, NestJS releases, Flutter updates, AWS ECS changes, Helius RPC, Anthropic API, Railway deployment platform',
+    domain: `Solana v2 official changelog and GitHub releases,
+      NestJS official releases and breaking changes,
+      Flutter SDK official release notes,
+      Helius RPC official API changelog,
+      Anthropic API official changelog and new capabilities,
+      MCP protocol updates and new server specifications,
+      Railway and Vercel official changelogs,
+      MongoDB Atlas official release notes,
+      AWS ECS and S3 official service updates,
+      Cloudflare Workers and R2 official changelog,
+      Node.js LTS official releases and security patches,
+      GitHub security advisories for our stack dependencies`,
   },
   {
     agentId: 'arshak',
@@ -182,7 +304,16 @@ const AGENT_DOMAINS = [
   {
     agentId: 'laura',
     category: 'technology',
-    domain: 'Fintech product management practices, KYC/AML UX patterns, stablecoin wallet UX research, go-to-market for payment apps, user onboarding conversion benchmarks',
+    domain: `Embedded wallet product trends (Privy, Dynamic, Turnkey),
+      stablecoin wallet UX research and benchmarks,
+      KYC/AML onboarding flow optimization,
+      non-custodial wallet product launches and feature updates,
+      go-to-market strategies for stablecoin payment apps,
+      user onboarding conversion benchmarks for crypto/fintech apps,
+      account abstraction UX improvements,
+      passkey and biometric authentication in financial apps,
+      product management frameworks for regulated fintech,
+      official product changelogs from Privy, Dynamic, Crossmint, Bridge`,
   },
   {
     agentId: 'alex',
@@ -251,8 +382,8 @@ Respond ONLY with valid JSON, no markdown:
       "trustLevel": "verified" | "informational" | "signal",
       "confidence": "High" | "Medium" | "Low",
       "verificationStatus": "confirmed" | "unverifiable" | "signal",
-      "sourceUrl": "url or empty string",
-      "sourceLabel": "source name"
+      "sourceUrl": "REQUIRED — exact URL of the official source article, changelog, or announcement. If no official URL available, set verificationStatus to unverifiable and confidence to Low.",
+      "sourceLabel": "human-readable source name e.g. 'Anthropic Changelog', 'Circle Blog', 'Solana Foundation News'"
     }
   ],
   "weekSummaryLine": "1-2 sentence summary of this domain this week"
@@ -320,8 +451,8 @@ Required JSON format:
       "trustLevel": "verified" | "informational" | "signal",
       "confidence": "High" | "Medium" | "Low",
       "verificationStatus": "confirmed" | "unverifiable" | "signal",
-      "sourceUrl": "url or empty string",
-      "sourceLabel": "source name"
+      "sourceUrl": "REQUIRED — exact URL of the official source article, changelog, or announcement. If no official URL available, set verificationStatus to unverifiable and confidence to Low.",
+      "sourceLabel": "human-readable source name e.g. 'Anthropic Changelog', 'Circle Blog', 'Solana Foundation News'"
     }
   ],
   "weekSummaryLine": "1 sentence summary of this domain this week"
