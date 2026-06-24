@@ -1,0 +1,321 @@
+import { getDb } from './db.js';
+
+const OFFICIAL_DOMAINS = [
+  'eba.europa.eu', 'esma.europa.eu', 'ec.europa.eu', 'ecb.europa.eu',
+  'eur-lex.europa.eu', 'fatf-gafi.org', 'moneyval.coe.int',
+  'sec.gov', 'cftc.gov', 'fincen.gov', 'occ.gov', 'federalreserve.gov',
+  'cfpb.gov', 'cnb.cz', 'cba.am',
+];
+
+const MEDIA_DOMAINS = [
+  'thepaypers.com', 'finextra.com', 'coindesk.com', 'dlnews.com',
+  'sifted.eu', 'techcrunch.com', 'bloomberg.com', 'reuters.com',
+  'ft.com', 'theblock.co', 'chainalysis.com', 'fireblocks.com',
+];
+
+const MONITORED_THOUGHT_LEADERS = [
+  'Marcel van Oost', 'Arthur Bedel', 'Simon Taylor', 'Nic Carter',
+  'Nathan Sexer', 'Jeremy Allaire', 'Linas Beliunas', 'Alex Johnson',
+  'Patrick McKenzie', 'Lex Sokolin', 'Ron Shevlin', 'Jason Mikula',
+  'Richard Turrin', 'Theodora Lau', 'Jake Chervinsky', 'Caitlin Long',
+  'David Birch', 'Chris Skinner', 'Ghela Boskovich', 'Anne Boden',
+  'Spiros Margaris', 'Efi Pylarinou', 'Brett King', 'Matt Harris',
+  'Adrienne Harris', 'Karen Webster', 'Jason Henrichs', 'David Parker',
+  'Leda Glyptis', 'Miranda Steinhauser',
+];
+
+function classifySourceUrl(url: string): 'official' | 'media' | 'other' {
+  if (!url) return 'other';
+  try {
+    const hostname = new URL(url).hostname.replace('www.', '');
+    if (OFFICIAL_DOMAINS.some(d => hostname === d || hostname.endsWith('.' + d))) {
+      return 'official';
+    }
+    if (MEDIA_DOMAINS.some(d => hostname === d || hostname.endsWith('.' + d))) {
+      return 'media';
+    }
+  } catch {
+    // Invalid URL
+  }
+  return 'other';
+}
+
+export async function writeKnowledgeEntry(input: {
+  title: string;
+  content: string;
+  category: 'regulation' | 'technology' | 'market' | 'competitor'
+          | 'partner' | 'education' | 'general';
+  permanence: 'permanent' | 'temporary';
+  expiryDays?: number;
+  trustLevel: 'verified' | 'informational' | 'signal';
+  sourceType: 'official' | 'media' | 'research' | 'company'
+            | 'linkedin_expert' | 'linkedin_general' | 'social' | 'inferred';
+  sourceUrl?: string;
+  tags?: string[];
+  signalScore: number;
+  isOpinion?: boolean;
+  authorName?: string;
+  agentScope?: string;
+  verificationStatus?: 'confirmed' | 'informational' | 'pending';
+}): Promise<string> {
+  const db = await getDb();
+  const collection = db.collection('knowledges');
+
+  if (['linkedin_general', 'social', 'inferred'].includes(input.sourceType)) {
+    return `BLOCKED: sourceType '${input.sourceType}' is not permitted in the knowledge base. Use write_inbox_signal instead.`;
+  }
+
+  const urlClass = classifySourceUrl(input.sourceUrl || '');
+  let enforcedTrustLevel = input.trustLevel;
+  let enforcedVerificationStatus = input.verificationStatus || 'pending';
+
+  if (input.trustLevel === 'verified' && urlClass !== 'official') {
+    enforcedTrustLevel = 'informational';
+    enforcedVerificationStatus = 'pending';
+  }
+  if (urlClass === 'official') {
+    enforcedTrustLevel = 'verified';
+    enforcedVerificationStatus = 'confirmed';
+  }
+  if (urlClass === 'media' && enforcedTrustLevel === 'signal') {
+    enforcedTrustLevel = 'informational';
+  }
+
+  if (input.isOpinion || input.sourceType === 'linkedin_expert') {
+    enforcedVerificationStatus = 'pending';
+    enforcedTrustLevel = 'signal';
+  }
+
+  let score = Math.max(1, Math.min(10, Math.round(input.signalScore)));
+  if (input.sourceType === 'linkedin_expert') score = Math.min(score, 6);
+  if (input.sourceType === 'company') score = Math.min(score, 5);
+  if (score <= 3) {
+    return `BLOCKED: signalScore ${score} ≤ 3. Entry is noise. Do not write.`;
+  }
+
+  if (score >= 7 && !input.sourceUrl) {
+    return `BLOCKED: signalScore ${score} requires a sourceUrl. Provide a direct source URL or lower the score.`;
+  }
+
+  let finalContent = input.content;
+  if (input.isOpinion && input.authorName) {
+    finalContent = `[Opinion — ${input.authorName}]: ${input.content}`;
+  }
+  if (input.sourceType === 'company') {
+    finalContent = `[Self-reported, unverified]: ${input.content}`;
+  }
+
+  const doc = {
+    title: input.title,
+    summary: finalContent,
+    category: input.category,
+    permanent: input.permanence === 'permanent',
+    expiresAt: input.permanence === 'temporary' && input.expiryDays
+      ? new Date(Date.now() + input.expiryDays * 24 * 60 * 60 * 1000)
+      : null,
+    trustLevel: enforcedTrustLevel,
+    verificationStatus: enforcedVerificationStatus,
+    sourceType: input.sourceType,
+    source: input.sourceUrl || '',
+    isOpinion: input.isOpinion || false,
+    authorName: input.authorName || '',
+    tags: input.tags || [],
+    signalScore: score,
+    noiseFlag: score <= 3,
+    scope: input.agentScope ? 'professional' : 'organization',
+    targetAgent: input.agentScope || null,
+    relevantAgents: input.agentScope ? [input.agentScope] : [],
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    addedBy: 'hasmik',
+    status: 'active',
+  };
+
+  await collection.insertOne(doc);
+  return `Saved: "${input.title}" — score:${score}, trust:${enforcedTrustLevel}, status:${enforcedVerificationStatus}, source:${input.sourceType}`;
+}
+
+export async function writeFundraisingRound(input: {
+  company: string;
+  amount: string;
+  round: 'Pre-Seed' | 'Seed' | 'Series A' | 'Series B' | 'Series C' | 'Other';
+  investors: string[];
+  sector: string;
+  relevance: string;
+  sourceUrl: string;
+  announcedDate: string;
+}): Promise<string> {
+  if (!input.sourceUrl) {
+    return `REJECTED: Fundraising rounds require a direct source URL (Crunchbase, TechCrunch, official press release). Do not write from inference.`;
+  }
+
+  if (input.sourceUrl.includes('linkedin.com')) {
+    return `REJECTED: LinkedIn is not an acceptable source for fundraising rounds. Find a Crunchbase, TechCrunch, or official press release URL. A founder announcing their own round on LinkedIn is not verified intelligence.`;
+  }
+
+  if (!input.investors.length ||
+      input.investors.every(i => i.toLowerCase().includes('undisclosed'))) {
+    return `REJECTED: Fundraising entries require at least one named investor. Undisclosed investor rounds do not qualify as actionable intelligence.`;
+  }
+
+  const announced = new Date(input.announcedDate);
+  if (isNaN(announced.getTime())) {
+    return `REJECTED: announcedDate "${input.announcedDate}" is not a valid ISO date. Provide the exact announcement date.`;
+  }
+  const daysSince = (Date.now() - announced.getTime()) / (1000 * 60 * 60 * 24);
+  if (daysSince > 14) {
+    return `REJECTED: Round announced ${input.announcedDate} is ${Math.round(daysSince)} days old. Only rounds from the past 14 days qualify as current intelligence.`;
+  }
+
+  const db = await getDb();
+  const collection = db.collection('fundraisingrounds');
+
+  const weekStart = new Date();
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+  weekStart.setHours(0, 0, 0, 0);
+
+  const existing = await collection.findOne({
+    companyName: input.company,
+    createdAt: { $gte: weekStart },
+  });
+  if (existing) {
+    return `SKIPPED: "${input.company}" already recorded this week.`;
+  }
+
+  const amountNum = parseFloat(input.amount.replace(/[^0-9.]/g, '')) || 0;
+  const currency = input.amount.includes('€') ? 'EUR' : 'USD';
+
+  await collection.insertOne({
+    companyName: input.company,
+    amount: amountNum,
+    currency,
+    roundType: input.round.toLowerCase().replace(/\s+/g, '-'),
+    investors: input.investors.map(name => ({ name, firm: name })),
+    category: input.sector,
+    relevanceToAeda: input.relevance,
+    sourceUrl: input.sourceUrl,
+    announcedDate: input.announcedDate,
+    weekOf: weekStart,
+    addedBy: 'hasmik',
+    createdAt: new Date(),
+    addedToPipeline: false,
+  });
+
+  return `Saved round: ${input.company} — ${input.amount} ${input.round} (announced: ${input.announcedDate})`;
+}
+
+export async function writeFundingOpportunity(input: {
+  name: string;
+  type: 'Accelerator' | 'Grant' | 'Government' | 'VC Program' | 'Competition' | 'Other';
+  provider: string;
+  deadline?: string;
+  amount?: string;
+  eligibility: string;
+  applyUrl?: string;
+  region: string;
+}): Promise<string> {
+  const db = await getDb();
+  const collection = db.collection('fundingopportunities');
+
+  const existing = await collection.findOne({ programName: input.name });
+  if (existing) {
+    return `SKIPPED: "${input.name}" already exists in funding opportunities.`;
+  }
+
+  await collection.insertOne({
+    programName: input.name,
+    type: input.type.toLowerCase(),
+    provider: input.provider,
+    deadline: input.deadline || 'Rolling',
+    fundingAmount: input.amount || '',
+    eligibilityReasoning: input.eligibility,
+    applicationUrl: input.applyUrl || '',
+    geography: [input.region],
+    status: 'open',
+    dismissed: false,
+    applied: false,
+    isAedaEligible: true,
+    recommendedAction: '',
+    priority: 'Medium',
+    addedBy: 'hasmik',
+    createdAt: new Date(),
+  });
+
+  return `Saved opportunity: ${input.name} (${input.type} — ${input.provider})`;
+}
+
+export async function writeInboxSignal(input: {
+  title: string;
+  content: string;
+  sourceUrl?: string;
+  sourceType: string;
+  authorName?: string;
+  reason: string;
+  type: 'unverified-signal' | 'potential-misinformation' | 'opinion-signal';
+}): Promise<string> {
+  const db = await getDb();
+
+  await db.collection('os_inbox_items').insertOne({
+    recipient: 'artur',
+    sender_email: 'hasmik@aeda.internal',
+    sender_name: '@hasmik (Research Agent)',
+    subject: `[${input.type}] ${input.title}`,
+    body_text: [
+      input.content,
+      input.authorName ? `Author: ${input.authorName}` : '',
+      input.sourceUrl ? `Source: ${input.sourceUrl}` : 'No source URL',
+      `Flagged because: ${input.reason}`,
+    ].filter(Boolean).join('\n\n'),
+    body_sanitized: input.content,
+    agent_commentary: `Flagged by @hasmik: ${input.reason}`,
+    message_id: `hasmik-signal-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    received_at: new Date(),
+    processing_status: 'draft_created',
+    routing: {
+      artur_classification: input.type,
+      routed_to_agent: 'artur',
+      artur_brief: input.reason,
+      lilit_task_id: null,
+    },
+    crm_match: { matched: false, investor_id: null, investor_name: null, matched_on: null },
+    createdAt: new Date(),
+  });
+
+  return `Flagged to Artur inbox (${input.type}): "${input.title}"`;
+}
+
+interface KnowledgeEntry {
+  category: string;
+  title: string;
+  signalScore: number;
+  sourceType: string;
+}
+
+export async function readRecentKnowledgeTitles(input: {
+  category?: string;
+  daysBack?: number;
+}): Promise<string> {
+  const db = await getDb();
+  const collection = db.collection('knowledges');
+
+  const since = new Date();
+  since.setDate(since.getDate() - (input.daysBack ?? 30));
+
+  const query: Record<string, unknown> = { createdAt: { $gte: since } };
+  if (input.category) query['category'] = input.category;
+
+  const entries = await collection
+    .find(query)
+    .project({ title: 1, category: 1, signalScore: 1, sourceType: 1 })
+    .sort({ createdAt: -1 })
+    .limit(60)
+    .toArray() as unknown as KnowledgeEntry[];
+
+  if (!entries.length) return 'No recent entries found in this category.';
+
+  return entries
+    .map(e => `[${e.category}] ${e.title} (score:${e.signalScore}, source:${e.sourceType})`)
+    .join('\n');
+}
+
+export { MONITORED_THOUGHT_LEADERS };
