@@ -94,6 +94,131 @@ const STRUCTURING_TOOL = {
   },
 };
 
+const AEDA_COMPANY_PROFILE = `aeda is a non-custodial EURC stablecoin infrastructure company for the EU-Armenia corridor.
+Pre-seed stage startup based in Prague, Czech Republic.
+Geographic focus: EU and EECA (Eastern Europe, Caucasus, Armenia).
+Technology-network positioning — NOT a payment processor, CASP, VASP, or EMI.
+Business model: infrastructure layer enabling EUR-AMD corridor transfers via EURC stablecoin.`;
+
+const SCORING_SYSTEM_PROMPT = `You are an investor fit analyst for aeda.
+
+Score how well this investor fits aeda based on the research data provided.
+
+COMPANY PROFILE:
+${AEDA_COMPANY_PROFILE}
+
+Score each dimension 1-10 with mandatory one-sentence reasoning:
+- thesis: How well does the investor's stated thesis align with aeda's business?
+- stage: Does the investor invest at pre-seed stage?
+- geo: Does the investor focus on EU, EECA, or global (inclusive of these regions)?
+- checkSize: Is their typical check size appropriate for pre-seed (~$100K-$500K ideal)?
+- portfolio: Do they have relevant portfolio companies (fintech, crypto, payments, infrastructure)?
+- impact: How much could they help beyond capital (intros, expertise, reputation)?
+- network: Do they have connections relevant to EU-Armenia corridor or fintech/crypto sector?
+
+Also provide:
+- overallPriority: High/Medium/Low holistic assessment
+- bestOutreachAngle: 1-2 sentences citing a specific hook from the research
+- bestContactPerson: Name from contact field or null`;
+
+const SCORING_TOOL = {
+  name: 'score_investor_fit',
+  description: 'Score investor fit across 7 dimensions with reasoning',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      thesis: {
+        type: 'object' as const,
+        properties: {
+          score: { type: 'number', minimum: 1, maximum: 10 },
+          reasoning: { type: 'string', description: 'One sentence explaining the score' },
+        },
+        required: ['score', 'reasoning'],
+      },
+      stage: {
+        type: 'object' as const,
+        properties: {
+          score: { type: 'number', minimum: 1, maximum: 10 },
+          reasoning: { type: 'string' },
+        },
+        required: ['score', 'reasoning'],
+      },
+      geo: {
+        type: 'object' as const,
+        properties: {
+          score: { type: 'number', minimum: 1, maximum: 10 },
+          reasoning: { type: 'string' },
+        },
+        required: ['score', 'reasoning'],
+      },
+      checkSize: {
+        type: 'object' as const,
+        properties: {
+          score: { type: 'number', minimum: 1, maximum: 10 },
+          reasoning: { type: 'string' },
+        },
+        required: ['score', 'reasoning'],
+      },
+      portfolio: {
+        type: 'object' as const,
+        properties: {
+          score: { type: 'number', minimum: 1, maximum: 10 },
+          reasoning: { type: 'string' },
+        },
+        required: ['score', 'reasoning'],
+      },
+      impact: {
+        type: 'object' as const,
+        properties: {
+          score: { type: 'number', minimum: 1, maximum: 10 },
+          reasoning: { type: 'string' },
+        },
+        required: ['score', 'reasoning'],
+      },
+      network: {
+        type: 'object' as const,
+        properties: {
+          score: { type: 'number', minimum: 1, maximum: 10 },
+          reasoning: { type: 'string' },
+        },
+        required: ['score', 'reasoning'],
+      },
+      overallPriority: {
+        type: 'string' as const,
+        enum: ['High', 'Medium', 'Low'],
+        description: 'Holistic priority assessment based on all dimensions',
+      },
+      bestOutreachAngle: {
+        type: ['string', 'null'] as const,
+        description: '1-2 sentences: the single most compelling hook citing specific research',
+      },
+      bestContactPerson: {
+        type: ['string', 'null'] as const,
+        description: 'Name from contact field, or null if not found',
+      },
+    },
+    required: ['thesis', 'stage', 'geo', 'checkSize', 'portfolio', 'impact', 'network', 'overallPriority', 'bestOutreachAngle', 'bestContactPerson'],
+  },
+};
+
+interface DimensionScoreOutput {
+  score: number;
+  reasoning: string;
+}
+
+interface ScoringOutput {
+  thesis: DimensionScoreOutput;
+  stage: DimensionScoreOutput;
+  geo: DimensionScoreOutput;
+  checkSize: DimensionScoreOutput;
+  portfolio: DimensionScoreOutput;
+  impact: DimensionScoreOutput;
+  network: DimensionScoreOutput;
+  overallPriority: 'High' | 'Medium' | 'Low';
+  bestOutreachAngle: string | null;
+  bestContactPerson: string | null;
+}
+
 interface StructuredResearchOutput {
   thesis: string | null;
   stage: string | null;
@@ -106,6 +231,104 @@ interface StructuredResearchOutput {
   contactConfidence: 'verified' | 'inferred' | null;
   contactLinkedIn: string | null;
   sources: { url: string; title: string }[];
+}
+
+async function scoreInvestorFit(
+  investorObjId: Types.ObjectId,
+  investorId: string,
+  investorName: string,
+  researchData: StructuredResearchOutput
+): Promise<void> {
+  const researchSummary = `
+INVESTOR: ${investorName}
+
+THESIS: ${researchData.thesis || 'Not found'}
+
+STAGE FOCUS: ${researchData.stage || 'Not found'}
+
+CHECK SIZE: ${researchData.checkSize || 'Not found'}
+
+GEOGRAPHIC FOCUS: ${researchData.geoFocus?.join(', ') || 'Not found'}
+
+PORTFOLIO COMPANIES: ${researchData.portfolioCompanies.length > 0 ? researchData.portfolioCompanies.join(', ') : 'None found'}
+
+RECENT ACTIVITY: ${researchData.recentActivity || 'Not found'}
+
+CONTACT: ${researchData.contactName || 'Not found'}
+`.trim();
+
+  const scoringResponse = await anthropic.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 1024,
+    system: SCORING_SYSTEM_PROMPT,
+    tools: [SCORING_TOOL],
+    tool_choice: { type: 'tool', name: 'score_investor_fit' },
+    messages: [{ role: 'user', content: `Score this investor's fit for aeda:\n\n${researchSummary}` }],
+  });
+
+  const scoringCost = estimateCostUsd(
+    'claude-haiku-4-5-20251001',
+    scoringResponse.usage.input_tokens,
+    scoringResponse.usage.output_tokens
+  );
+
+  await costLedgerRepo.insert({
+    agentOrJob: JOB_NAME,
+    packageId: null,
+    projectKey: null,
+    llmModel: 'claude-haiku-4-5-20251001',
+    inputTokens: scoringResponse.usage.input_tokens,
+    outputTokens: scoringResponse.usage.output_tokens,
+    costUsd: scoringCost,
+    estimatedMaxUsd: scoringCost,
+    tier: 'background',
+  });
+
+  let scoringData: ScoringOutput | null = null;
+  for (const block of scoringResponse.content) {
+    if (block.type === 'tool_use' && block.name === 'score_investor_fit') {
+      scoringData = block.input as ScoringOutput;
+      break;
+    }
+  }
+
+  if (!scoringData) {
+    logger.warn({ investorId }, 'scoring tool output not found');
+    return;
+  }
+
+  const scoredAt = new Date();
+  await InvestorResearch.findOneAndUpdate(
+    { investorId: investorObjId },
+    {
+      $set: {
+        relevanceScore: {
+          thesis: scoringData.thesis,
+          stage: scoringData.stage,
+          geo: scoringData.geo,
+          checkSize: scoringData.checkSize,
+          portfolio: scoringData.portfolio,
+          impact: scoringData.impact,
+          network: scoringData.network,
+          overallPriority: scoringData.overallPriority,
+          bestOutreachAngle: scoringData.bestOutreachAngle,
+          bestContactPerson: scoringData.bestContactPerson,
+          scoredAt,
+        },
+        updatedAt: scoredAt,
+      },
+    }
+  );
+
+  logger.info(
+    {
+      investorId,
+      investorName,
+      overallPriority: scoringData.overallPriority,
+      scoringCost,
+    },
+    'investor scoring completed'
+  );
 }
 
 async function runResearchAsync(
@@ -260,6 +483,14 @@ async function runResearchAsync(
       },
       'investor research completed'
     );
+
+    // Chain scoring step — errors here don't fail the research result
+    try {
+      await scoreInvestorFit(investorObjId, investorId, investorName, structuredData);
+    } catch (scoringErr) {
+      const scoringErrMsg = scoringErr instanceof Error ? scoringErr.message : String(scoringErr);
+      logger.error({ error: scoringErrMsg, investorId }, 'investor scoring failed (research still completed)');
+    }
 
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);

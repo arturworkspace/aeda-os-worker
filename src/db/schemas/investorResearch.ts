@@ -18,6 +18,25 @@ export interface IInvestorResearchSource {
   fetchedAt: Date;
 }
 
+export interface IDimensionScore {
+  score: number;
+  reasoning: string;
+}
+
+export interface IRelevanceScore {
+  thesis: IDimensionScore | null;
+  stage: IDimensionScore | null;
+  geo: IDimensionScore | null;
+  checkSize: IDimensionScore | null;
+  portfolio: IDimensionScore | null;
+  impact: IDimensionScore | null;
+  network: IDimensionScore | null;
+  overallPriority: 'High' | 'Medium' | 'Low' | null;
+  bestOutreachAngle: string | null;
+  bestContactPerson: string | null;
+  scoredAt: Date | null;
+}
+
 export interface IInvestorResearch {
   investorId: Types.ObjectId;
   thesis: string | null;
@@ -30,6 +49,7 @@ export interface IInvestorResearch {
   sources: IInvestorResearchSource[];
   status: 'pending' | 'running' | 'completed' | 'failed';
   error: string | null;
+  relevanceScore: IRelevanceScore | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -55,6 +75,31 @@ const sourceSchema = new Schema<IInvestorResearchSource>(
   { _id: false }
 );
 
+const dimensionScoreSchema = new Schema<IDimensionScore>(
+  {
+    score: { type: Number, required: true, min: 1, max: 10 },
+    reasoning: { type: String, required: true },
+  },
+  { _id: false }
+);
+
+const relevanceScoreSchema = new Schema<IRelevanceScore>(
+  {
+    thesis: { type: dimensionScoreSchema, default: null },
+    stage: { type: dimensionScoreSchema, default: null },
+    geo: { type: dimensionScoreSchema, default: null },
+    checkSize: { type: dimensionScoreSchema, default: null },
+    portfolio: { type: dimensionScoreSchema, default: null },
+    impact: { type: dimensionScoreSchema, default: null },
+    network: { type: dimensionScoreSchema, default: null },
+    overallPriority: { type: String, enum: ['High', 'Medium', 'Low', null], default: null },
+    bestOutreachAngle: { type: String, default: null },
+    bestContactPerson: { type: String, default: null },
+    scoredAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
 const investorResearchSchema = new Schema<IInvestorResearch>(
   {
     investorId: { type: Schema.Types.ObjectId, required: true, index: true },
@@ -72,6 +117,7 @@ const investorResearchSchema = new Schema<IInvestorResearch>(
       default: 'pending',
     },
     error: { type: String, default: null },
+    relevanceScore: { type: relevanceScoreSchema, default: null },
   },
   {
     collection: 'os_investor_research',
