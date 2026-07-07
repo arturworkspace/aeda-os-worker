@@ -26,7 +26,9 @@ Research this investor for fit assessment. Find:
 
 Cite every claim with a source URL. If you cannot find something after thorough search, say so explicitly — do not guess or invent data.
 
-IMPORTANT: Only report information you can cite. Missing data is acceptable; fabricated data is not.`;
+IMPORTANT: Only report information you can cite. Missing data is acceptable; fabricated data is not.
+
+SOURCE URLs: Every source you cite must have a real, valid http:// or https:// URL. If you cannot confirm the URL for a source, omit that source entry entirely — do NOT use placeholder strings like "<UNKNOWN>", "N/A", "unknown", or similar. An empty sources list is acceptable; placeholder URLs are not.`;
 
 const STRUCTURING_TOOL = {
   name: 'structure_research',
