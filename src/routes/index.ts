@@ -1,6 +1,7 @@
 import { Express } from 'express';
 import { Agenda } from 'agenda';
 import { createWebhookRouter } from './webhookInbound.js';
+import { createInvestorResearchRouter } from './investorResearch.js';
 import { logger } from '../logger.js';
 
 export function registerRoutes(app: Express, agenda: Agenda): void {
@@ -30,6 +31,10 @@ export function registerRoutes(app: Express, agenda: Agenda): void {
       res.status(500).json({ error: msg });
     }
   });
+
+  // Investor research on-demand trigger (protected by secret)
+  const investorResearchRouter = createInvestorResearchRouter();
+  app.use('/jobs/investor-research', investorResearchRouter);
 
   logger.info('routes registered');
 }
