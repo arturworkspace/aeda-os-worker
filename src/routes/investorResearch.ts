@@ -233,6 +233,26 @@ interface StructuredResearchOutput {
   sources: { url: string; title: string }[];
 }
 
+function isValidDimensionScore(val: unknown): val is DimensionScoreOutput {
+  return (
+    typeof val === 'object' &&
+    val !== null &&
+    typeof (val as DimensionScoreOutput).score === 'number' &&
+    typeof (val as DimensionScoreOutput).reasoning === 'string'
+  );
+}
+
+function isValidScoringOutput(data: unknown): data is ScoringOutput {
+  if (typeof data !== 'object' || data === null) return false;
+  const d = data as Record<string, unknown>;
+  const dimensions = ['thesis', 'stage', 'geo', 'checkSize', 'portfolio', 'impact', 'network'];
+  for (const dim of dimensions) {
+    if (!isValidDimensionScore(d[dim])) return false;
+  }
+  if (!['High', 'Medium', 'Low'].includes(d['overallPriority'] as string)) return false;
+  return true;
+}
+
 async function scoreInvestorFit(
   investorObjId: Types.ObjectId,
   investorId: string,
@@ -257,19 +277,51 @@ RECENT ACTIVITY: ${researchData.recentActivity || 'Not found'}
 CONTACT: ${researchData.contactName || 'Not found'}
 `.trim();
 
-  const scoringResponse = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
+  const scoringRequest = {
+    model: 'claude-haiku-4-5-20251001' as const,
     max_tokens: 1024,
     system: SCORING_SYSTEM_PROMPT,
     tools: [SCORING_TOOL],
-    tool_choice: { type: 'tool', name: 'score_investor_fit' },
-    messages: [{ role: 'user', content: `Score this investor's fit for aeda:\n\n${researchSummary}` }],
-  });
+    tool_choice: { type: 'tool' as const, name: 'score_investor_fit' },
+    messages: [{ role: 'user' as const, content: `Score this investor's fit for aeda:\n\n${researchSummary}` }],
+  };
+
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let scoringData: ScoringOutput | null = null;
+  let attemptCount = 0;
+  const maxAttempts = 2;
+
+  while (attemptCount < maxAttempts && !scoringData) {
+    attemptCount++;
+    const scoringResponse = await anthropic.messages.create(scoringRequest);
+
+    totalInputTokens += scoringResponse.usage.input_tokens;
+    totalOutputTokens += scoringResponse.usage.output_tokens;
+
+    let rawInput: unknown = null;
+    for (const block of scoringResponse.content) {
+      if (block.type === 'tool_use' && block.name === 'score_investor_fit') {
+        rawInput = block.input;
+        break;
+      }
+    }
+
+    if (rawInput && isValidScoringOutput(rawInput)) {
+      scoringData = rawInput;
+    } else {
+      const rawContentPreview = JSON.stringify(scoringResponse.content).slice(0, 500);
+      logger.warn(
+        { investorId, attempt: attemptCount, rawContentPreview },
+        'malformed scoring tool_use response, ' + (attemptCount < maxAttempts ? 'retrying' : 'giving up')
+      );
+    }
+  }
 
   const scoringCost = estimateCostUsd(
     'claude-haiku-4-5-20251001',
-    scoringResponse.usage.input_tokens,
-    scoringResponse.usage.output_tokens
+    totalInputTokens,
+    totalOutputTokens
   );
 
   await costLedgerRepo.insert({
@@ -277,23 +329,15 @@ CONTACT: ${researchData.contactName || 'Not found'}
     packageId: null,
     projectKey: null,
     llmModel: 'claude-haiku-4-5-20251001',
-    inputTokens: scoringResponse.usage.input_tokens,
-    outputTokens: scoringResponse.usage.output_tokens,
+    inputTokens: totalInputTokens,
+    outputTokens: totalOutputTokens,
     costUsd: scoringCost,
     estimatedMaxUsd: scoringCost,
     tier: 'background',
   });
 
-  let scoringData: ScoringOutput | null = null;
-  for (const block of scoringResponse.content) {
-    if (block.type === 'tool_use' && block.name === 'score_investor_fit') {
-      scoringData = block.input as ScoringOutput;
-      break;
-    }
-  }
-
   if (!scoringData) {
-    logger.warn({ investorId }, 'scoring tool output not found');
+    logger.warn({ investorId, attempts: attemptCount }, 'scoring failed after all attempts, leaving relevanceScore null');
     return;
   }
 
@@ -326,6 +370,7 @@ CONTACT: ${researchData.contactName || 'Not found'}
       investorName,
       overallPriority: scoringData.overallPriority,
       scoringCost,
+      attempts: attemptCount,
     },
     'investor scoring completed'
   );
