@@ -321,49 +321,55 @@ CONTACT: ${researchData.contactName || 'Not found'}
     }
   }
 
-  // Regex-repair fallback for known malformed pattern (single dimension as string)
+  // Regex-repair fallback for known malformed pattern (any number of dimensions as string)
   if (!scoringData && lastRawInput && typeof lastRawInput === 'object' && lastRawInput !== null) {
     const raw = lastRawInput as Record<string, unknown>;
     const dimensions = ['thesis', 'stage', 'geo', 'checkSize', 'portfolio', 'impact', 'network'] as const;
     const scoreRegex = /<parameter name="score">(\d+)/;
 
-    let malformedDim: typeof dimensions[number] | null = null;
-    let validCount = 0;
+    const malformedDims: typeof dimensions[number][] = [];
+    let canRepair = true;
 
     for (const dim of dimensions) {
       if (isValidDimensionScore(raw[dim])) {
-        validCount++;
+        // Already valid, no repair needed
       } else if (typeof raw[dim] === 'string' && scoreRegex.test(raw[dim] as string)) {
-        if (malformedDim === null) {
-          malformedDim = dim;
-        } else {
-          malformedDim = null;
-          break;
-        }
+        malformedDims.push(dim);
       } else {
-        malformedDim = null;
+        // Unknown malformed shape — abort repair entirely
+        canRepair = false;
         break;
       }
     }
 
-    if (malformedDim !== null && validCount === 6) {
-      const match = (raw[malformedDim] as string).match(scoreRegex);
-      if (match && match[1]) {
-        const extractedScore = parseInt(match[1], 10);
-        const fallbackReasoning = typeof raw['reasoning'] === 'string'
-          ? raw['reasoning']
-          : 'Reasoning not available due to a model formatting issue for this dimension.';
+    if (canRepair && malformedDims.length > 0) {
+      const topLevelReasoning = typeof raw['reasoning'] === 'string' ? raw['reasoning'] : null;
+      const repairedRaw = { ...raw };
+      const extractedScores: Record<string, number> = {};
+      let repairSuccess = true;
 
-        const repaired: DimensionScoreOutput = { score: extractedScore, reasoning: fallbackReasoning };
-        const repairedRaw = { ...raw, [malformedDim]: repaired };
-
-        if (isValidScoringOutput(repairedRaw)) {
-          scoringData = repairedRaw;
-          logger.info(
-            { investorId, repairedDimension: malformedDim, extractedScore },
-            `repaired malformed ${malformedDim} dimension via regex extraction`
-          );
+      for (let i = 0; i < malformedDims.length; i++) {
+        const dim = malformedDims[i]!;
+        const match = (raw[dim] as string).match(scoreRegex);
+        if (match && match[1]) {
+          const extractedScore = parseInt(match[1], 10);
+          extractedScores[dim] = extractedScore;
+          const reasoning = (i === 0 && topLevelReasoning)
+            ? topLevelReasoning
+            : 'Reasoning not available due to a model formatting issue for this dimension.';
+          repairedRaw[dim] = { score: extractedScore, reasoning };
+        } else {
+          repairSuccess = false;
+          break;
         }
+      }
+
+      if (repairSuccess && isValidScoringOutput(repairedRaw)) {
+        scoringData = repairedRaw as ScoringOutput;
+        logger.info(
+          { investorId, repairedDimensions: malformedDims, extractedScores },
+          `repaired ${malformedDims.length} malformed dimension(s) via regex extraction: ${malformedDims.join(', ')}`
+        );
       }
     }
   }
