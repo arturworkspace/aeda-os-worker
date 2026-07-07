@@ -2,18 +2,20 @@ import { Types, FilterQuery } from 'mongoose';
 import { EmailDraft, IEmailDraft, IEmailDraftDocument, DraftStatus } from '../schemas/emailDraft.js';
 
 export interface CreateEmailDraftInput {
-  inbox_item_id: Types.ObjectId;
+  inbox_item_id?: Types.ObjectId | null;
   drafted_by_agent: string;
   to: string;
   subject: string;
   body: string;
   thread_context?: string;
+  investorId?: Types.ObjectId;
+  followUpStage?: 'followup1' | 'followup2';
 }
 
 export const emailDraftRepo = {
   async create(input: CreateEmailDraftInput): Promise<IEmailDraftDocument> {
     const doc = new EmailDraft({
-      inbox_item_id: input.inbox_item_id,
+      inbox_item_id: input.inbox_item_id ?? null,
       drafted_by_agent: input.drafted_by_agent,
       to: input.to,
       subject: input.subject,
@@ -21,8 +23,20 @@ export const emailDraftRepo = {
       thread_context: input.thread_context ?? '',
       status: 'pending',
       created_at: new Date(),
+      investorId: input.investorId,
+      followUpStage: input.followUpStage,
     });
     return doc.save();
+  },
+
+  async findByInvestorAndStage(
+    investorId: Types.ObjectId | string,
+    followUpStage: 'followup1' | 'followup2'
+  ): Promise<IEmailDraftDocument | null> {
+    return EmailDraft.findOne({
+      investorId: new Types.ObjectId(investorId.toString()),
+      followUpStage,
+    }).exec();
   },
 
   async findById(id: Types.ObjectId | string): Promise<IEmailDraftDocument | null> {

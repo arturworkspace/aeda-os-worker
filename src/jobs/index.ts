@@ -4,6 +4,7 @@ import * as nightlyBackup from './system.nightlyBackup.js';
 import * as costRollup from './system.costRollup.js';
 import * as processInboundEmail from './processInboundEmail.js';
 import * as hasmikWeeklyIntelligence from './hasmik.weeklyIntelligence.js';
+import * as investorFollowUpScheduler from './investor.followUpScheduler.js';
 
 export function defineAllJobs(agenda: Agenda): void {
   lilitStandup.defineJob(agenda);
@@ -11,6 +12,7 @@ export function defineAllJobs(agenda: Agenda): void {
   costRollup.defineJob(agenda);
   processInboundEmail.defineJob(agenda);
   hasmikWeeklyIntelligence.defineJob(agenda);
+  investorFollowUpScheduler.defineJob(agenda);
 }
 
 export async function scheduleAllJobs(agenda: Agenda): Promise<void> {
@@ -18,6 +20,7 @@ export async function scheduleAllJobs(agenda: Agenda): Promise<void> {
   await nightlyBackup.scheduleJob(agenda);
   await costRollup.scheduleJob(agenda);
   await hasmikWeeklyIntelligence.scheduleJob(agenda);
+  await investorFollowUpScheduler.scheduleJob(agenda);
 }
 
-export { lilitStandup, nightlyBackup, costRollup, processInboundEmail, hasmikWeeklyIntelligence };
+export { lilitStandup, nightlyBackup, costRollup, processInboundEmail, hasmikWeeklyIntelligence, investorFollowUpScheduler };

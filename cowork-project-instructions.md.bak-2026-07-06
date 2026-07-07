@@ -1,0 +1,202 @@
+# aeda OS — Project Instructions
+
+Last updated: July 2026 — Slices 1–6 live
+
+## What Is This
+
+aeda OS is the internal operating system for aeda (VanCoin LLC), a non-custodial EURC wallet company. It consists of:
+
+1. **aeda-workspace** — Next.js frontend deployed on Vercel
+2. **aeda-os-worker** — Node.js background worker deployed on Railway
+
+The system provides an AI-powered workspace where agents (Claude-powered personas) handle tasks, review documents, process intelligence, and coordinate work.
+
+---
+
+## Features Built
+
+### Slice 1–3 — Core Workspace
+- Agent chat system with streaming responses
+- Task board (Kanban) with assignments, priorities, due dates
+- Room-based collaboration (Marketing, Legal, Product, Board Room, Fundraising, Training)
+- Org chart visualization
+- Project management with active project tracking
+
+### Slice 4 — OS Dashboard at /os-dashboard
+- Daily cost tracking per agent/job
+- Audit log of all LLM calls
+- Cost rollup job (system.costRollup) runs 03:30 Prague daily
+
+### Slice 5A — Knowledge Feed at /knowledge
+- Three-tier knowledge injection via getKnowledgeFeed():
+  - Tier 1: Permanent organization knowledge (targetAgents filter)
+  - Tier 2: Temporary intelligence items (14-day TTL)
+  - Tier 3: Professional knowledge targeted at specific agents
+  - Tier 4: Approved vault standards by agent role (Brand/Copy/Compliance/Design Standards — only when standardApproved: true)
+- Trust levels: fact (✓), analysis (△), signal (○)
+- Source types: official, media, research, company
+- Quality gates: signalScore ≤ 3 blocked, linkedin_general/social/inferred blocked
+
+### Slice 5B — Fundraising Intel at /fundraising-intel
+- Weekly funding rounds display
+- Funding opportunities pipeline
+- @hasmik agentic intelligence gathering
+- Investor → opportunity matching
+
+### Slice 6 — Document Vault at /vault
+- Three-tab UI: Documents / Templates / Standards
+- Upload PDF, DOCX, XLSX, PPTX with custom categories
+- Claude-native PDF text extraction (claude-sonnet-4-6)
+- MongoDB storage — R2 binary storage enabled (write token fixed July 2026)
+- Standards approval flow — Approve & Activate button
+- Tier 4 agent injection: approved standards inject into relevant agents via getKnowledgeFeed() (Brand Standard → tatev/mike/ruzan/sofi, Compliance Standard → narek/all external-facing agents, Design Standard → mike, Copy Standard → ruzan/sofi/tatev)
+- Manual status selector per document (Pending/Reviewed/Flagged)
+- Soft archive (no hard delete)
+- permanentDoc flag blocks archive on corporate/regulatory documents
+- Sidebar restructured: Intelligence / Fundraising / Work / Rooms / Company / Agents
+
+---
+
+## Scheduled Jobs
+
+| Job | Schedule | Description |
+|-----|----------|-------------|
+| heartbeat.lilitStandup | 07:00 Prague daily | @lilit morning standup summary |
+| system.nightlyBackup | 03:00 Prague daily | MongoDB → R2 backup |
+| system.costRollup | 03:30 Prague daily | Aggregate daily LLM costs |
+| hasmik.weeklyIntelligence | Monday 19:00 Prague | Full intelligence scan — agentic loop (claude-sonnet-4-6 + web_search + 4 custom tools + Haiku verification pass) |
+| processInboundEmail | On webhook trigger | Parse forwarded emails, route to agent inboxes |
+
+---
+
+## How to Work on This Project
+
+### Environment Setup
+
+**aeda-workspace:**
+```
+MONGODB_URI=mongodb+srv://...
+ANTHROPIC_API_KEY=sk-ant-...
+OS_WORKER_URL=https://aeda-os-worker-production.up.railway.app
+TRIGGER_SECRET=...
+R2_ENDPOINT=https://...r2.cloudflarestorage.com
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+R2_BUCKET_NAME=aeda-vault
+```
+
+**aeda-os-worker:**
+```
+MONGODB_URI=mongodb+srv://...
+ANTHROPIC_API_KEY=sk-ant-...
+R2_ENDPOINT=https://...r2.cloudflarestorage.com
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+R2_BUCKET=aeda-os-backups
+```
+
+### Key Files
+
+**Workspace:**
+- `src/app/(workspace)/layout.tsx` — Sidebar navigation
+- `src/app/api/vault/` — Vault API routes
+- `src/lib/knowledge.ts` — getKnowledgeFeed() with 4-tier injection
+- `src/lib/vaultReview.ts` — STANDARD_ROUTING, getStandardApprover()
+- `src/models/VaultDocument.ts` — Mongoose schema
+
+**Worker:**
+- `src/jobs/index.ts` — Job scheduler (Agenda)
+- `src/jobs/hasmik.weeklyIntelligence.ts` — @hasmik agentic loop
+
+Key worker lib files:
+- `src/lib/agentLoop.ts` — shared agentic loop runner (max 30 iterations, audit log)
+- `src/lib/hasmikTools.ts` — @hasmik tool handlers with quality gates
+- `src/lib/hasmikVerify.ts` — Haiku verification pass post-loop
+
+### Deployment
+
+**Workspace:** `vercel --prod`
+**Worker:** `railway up` or auto-deploy on push to main
+
+### TypeScript Check
+
+Always run before deploy:
+```bash
+npx tsc --noEmit
+```
+
+---
+
+## Known Backlog
+
+- Vault PDF extraction fails for design-export PDFs (Figma, InDesign) — manual paste fallback works
+- "Save to Vault" button on task completion (Slice 7)
+- Document version control — supersededBy chain (Slice 7)
+- Document → investor CRM relationship field (Slice 7)
+- @narek DPA confirmation required before uploading third-party counterparty NDAs
+- Gmail OAuth refresh token expiry handling
+- Inbox item bulk actions need confirmation modal
+- Task approval workflow (@artur approve before execute)
+- Agent memory persistence across sessions
+- Room message history pagination
+
+---
+
+## Architecture Notes
+
+### Agent Context Injection
+
+Every agent chat message is enriched with:
+1. Agent system prompt (from `src/lib/agents.ts`)
+2. Knowledge feed (getKnowledgeFeed with 4 tiers)
+3. Task context (if mentioned)
+4. Investor context (if @arshak and investor mentioned)
+
+### Vault Standards Flow
+
+1. Upload standard document (Brand/Copy/Compliance/Design)
+2. Claude extracts text content (claude-sonnet-4-6)
+3. Document saved with extractionStatus: completed
+4. User clicks "Approve & Activate"
+5. standardApproved: true, standardApprovedBy: "artur"
+6. getKnowledgeFeed() injects into relevant agents via STANDARD_ROUTING
+
+### Hasmik Intelligence Loop
+
+1. Triggered Monday 19:00 Prague (or manual via /api/os/trigger-hasmik)
+2. agentLoop runs with claude-sonnet-4-6
+3. Tools available: web_search, write_knowledge_entry, write_fundraising_round, write_funding_opportunity, write_inbox_signal
+4. Quality gates enforce: signalScore > 3, valid sourceType, sourceUrl required for score > 5
+5. Haiku verification pass reviews all entries, removes low-quality
+6. Results saved to MongoDB (KnowledgeEntry, FundraisingRound, FundingOpportunity)
+
+---
+
+## Contacts
+
+- **Artur Kartshikyan** — CEO, product owner
+- **External counsel** — Arun (legal questions requiring escalation)
+
+---
+
+## Quick Commands
+
+```bash
+# Workspace
+cd ~/Documents/Aeda\ Docs/Aedaworkspace/aeda-workspace
+npx tsc --noEmit && vercel --prod
+
+# Worker
+cd ~/Documents/Aeda\ Docs/Aedaworkspace/aeda-os-worker
+npx tsc --noEmit && railway up
+
+# Check Railway logs
+railway logs | tail -30
+
+# Check Vercel env
+vercel env ls
+
+# Trigger Hasmik manually
+curl -X POST https://aeda-workspace.vercel.app/api/os/trigger-hasmik \
+  -H "Authorization: Bearer $TRIGGER_SECRET"
+```

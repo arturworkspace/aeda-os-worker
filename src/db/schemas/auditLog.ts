@@ -18,6 +18,7 @@ export const AUDIT_EVENT_TYPES = [
   'webhook.auth_failed',
   'gmail.warning',
   'gmail.error',
+  'investor.followup_draft_created',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
