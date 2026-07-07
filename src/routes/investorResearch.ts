@@ -108,6 +108,182 @@ interface StructuredResearchOutput {
   sources: { url: string; title: string }[];
 }
 
+async function runResearchAsync(
+  investorObjId: Types.ObjectId,
+  investorId: string,
+  investorName: string,
+  investorFirm: string
+): Promise<void> {
+  const startTime = Date.now();
+  let totalCostUsd = 0;
+
+  try {
+    const researchQuery = investorFirm
+      ? `Research the investor "${investorName}" at "${investorFirm}" for startup investment fit assessment.`
+      : `Research the investor "${investorName}" for startup investment fit assessment.`;
+
+    logger.info({ investorId, investorName, investorFirm }, 'starting investor research (async)');
+
+    const researchResponse = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 4096,
+      system: RESEARCH_SYSTEM_PROMPT,
+      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+      messages: [{ role: 'user', content: researchQuery }],
+    });
+
+    const researchCost = estimateCostUsd(
+      'claude-sonnet-4-6',
+      researchResponse.usage.input_tokens,
+      researchResponse.usage.output_tokens
+    );
+    totalCostUsd += researchCost;
+
+    await costLedgerRepo.insert({
+      agentOrJob: JOB_NAME,
+      packageId: null,
+      projectKey: null,
+      llmModel: 'claude-sonnet-4-6',
+      inputTokens: researchResponse.usage.input_tokens,
+      outputTokens: researchResponse.usage.output_tokens,
+      costUsd: researchCost,
+      estimatedMaxUsd: researchCost,
+      tier: 'production',
+    });
+
+    let researchText = '';
+    for (const block of researchResponse.content) {
+      if (block.type === 'text') {
+        researchText += block.text + '\n';
+      }
+    }
+
+    if (!researchText.trim()) {
+      await upsertFailed(investorObjId, 'Research returned no content');
+      return;
+    }
+
+    const structureResponse = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 2048,
+      system: 'You are a data extraction assistant. Parse the research findings and call the structure_research tool with the extracted data. Use null for fields that were not found in the research. Only mark contactConfidence as "verified" if the email was explicitly cited from a source.',
+      tools: [STRUCTURING_TOOL],
+      tool_choice: { type: 'tool', name: 'structure_research' },
+      messages: [{ role: 'user', content: `Extract structured data from this investor research:\n\n${researchText}` }],
+    });
+
+    const structureCost = estimateCostUsd(
+      'claude-haiku-4-5-20251001',
+      structureResponse.usage.input_tokens,
+      structureResponse.usage.output_tokens
+    );
+    totalCostUsd += structureCost;
+
+    await costLedgerRepo.insert({
+      agentOrJob: JOB_NAME,
+      packageId: null,
+      projectKey: null,
+      llmModel: 'claude-haiku-4-5-20251001',
+      inputTokens: structureResponse.usage.input_tokens,
+      outputTokens: structureResponse.usage.output_tokens,
+      costUsd: structureCost,
+      estimatedMaxUsd: structureCost,
+      tier: 'background',
+    });
+
+    let structuredData: StructuredResearchOutput | null = null;
+    for (const block of structureResponse.content) {
+      if (block.type === 'tool_use' && block.name === 'structure_research') {
+        structuredData = block.input as StructuredResearchOutput;
+        break;
+      }
+    }
+
+    if (!structuredData) {
+      await upsertFailed(investorObjId, 'Failed to structure research data');
+      return;
+    }
+
+    const now = new Date();
+    await InvestorResearch.findOneAndUpdate(
+      { investorId: investorObjId },
+      {
+        $set: {
+          thesis: structuredData.thesis,
+          stage: structuredData.stage,
+          checkSize: structuredData.checkSize,
+          geoFocus: structuredData.geoFocus,
+          portfolioCompanies: structuredData.portfolioCompanies || [],
+          recentActivity: structuredData.recentActivity,
+          contact: {
+            name: structuredData.contactName,
+            email: structuredData.contactEmail,
+            confidence: structuredData.contactConfidence,
+            linkedIn: structuredData.contactLinkedIn,
+          },
+          sources: (structuredData.sources || []).map(s => ({
+            url: s.url,
+            title: s.title,
+            fetchedAt: now,
+          })),
+          status: 'completed',
+          error: null,
+          updatedAt: now,
+        },
+      },
+      { upsert: true }
+    );
+
+    await writeAuditEvent({
+      actor: 'system',
+      actorType: 'system',
+      eventType: 'job.run',
+      subjectId: investorObjId,
+      payload: {
+        jobName: JOB_NAME,
+        investorId,
+        investorName,
+        durationMs: Date.now() - startTime,
+        totalCostUsd,
+        sourcesFound: structuredData.sources?.length || 0,
+        hasContact: !!structuredData.contactEmail,
+      },
+    });
+
+    logger.info(
+      {
+        investorId,
+        investorName,
+        durationMs: Date.now() - startTime,
+        totalCostUsd,
+        sourcesFound: structuredData.sources?.length || 0,
+      },
+      'investor research completed'
+    );
+
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    logger.error({ error: errorMsg, investorId }, 'investor research failed (async)');
+
+    await upsertFailed(investorObjId, errorMsg);
+
+    await writeAuditEvent({
+      actor: 'system',
+      actorType: 'system',
+      eventType: 'job.run',
+      subjectId: investorObjId,
+      payload: {
+        jobName: JOB_NAME,
+        investorId,
+        success: false,
+        error: errorMsg,
+        durationMs: Date.now() - startTime,
+        totalCostUsd,
+      },
+    });
+  }
+}
+
 export function createInvestorResearchRouter(): Router {
   const router = Router();
 
@@ -126,8 +302,6 @@ export function createInvestorResearchRouter(): Router {
     }
 
     const investorObjId = new Types.ObjectId(investorId);
-    const startTime = Date.now();
-    let totalCostUsd = 0;
 
     try {
       // Step 1: Upsert running status immediately
@@ -186,179 +360,19 @@ export function createInvestorResearchRouter(): Router {
         return;
       }
 
-      // Step 4: Call Claude with web_search for research
-      const researchQuery = investorFirm
-        ? `Research the investor "${investorName}" at "${investorFirm}" for startup investment fit assessment.`
-        : `Research the investor "${investorName}" for startup investment fit assessment.`;
+      // Step 4: Respond immediately, then run research async
+      res.json({ status: 'running', investorId });
 
-      logger.info({ investorId, investorName, investorFirm }, 'starting investor research');
-
-      const researchResponse = await anthropic.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 4096,
-        system: RESEARCH_SYSTEM_PROMPT,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-        messages: [{ role: 'user', content: researchQuery }],
+      // Fire-and-forget: run research in background
+      runResearchAsync(investorObjId, investorId, investorName, investorFirm).catch((err) => {
+        logger.error({ error: err instanceof Error ? err.message : String(err), investorId }, 'unhandled error in async research');
       });
-
-      const researchCost = estimateCostUsd(
-        'claude-sonnet-4-6',
-        researchResponse.usage.input_tokens,
-        researchResponse.usage.output_tokens
-      );
-      totalCostUsd += researchCost;
-
-      await costLedgerRepo.insert({
-        agentOrJob: JOB_NAME,
-        packageId: null,
-        projectKey: null,
-        llmModel: 'claude-sonnet-4-6',
-        inputTokens: researchResponse.usage.input_tokens,
-        outputTokens: researchResponse.usage.output_tokens,
-        costUsd: researchCost,
-        estimatedMaxUsd: researchCost,
-        tier: 'production',
-      });
-
-      // Extract text content from research response
-      let researchText = '';
-      for (const block of researchResponse.content) {
-        if (block.type === 'text') {
-          researchText += block.text + '\n';
-        }
-      }
-
-      if (!researchText.trim()) {
-        await upsertFailed(investorObjId, 'Research returned no content');
-        res.json({ status: 'failed', investorId, error: 'Research returned no content' });
-        return;
-      }
-
-      // Step 5: Call Haiku to structure the output
-      const structureResponse = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 2048,
-        system: 'You are a data extraction assistant. Parse the research findings and call the structure_research tool with the extracted data. Use null for fields that were not found in the research. Only mark contactConfidence as "verified" if the email was explicitly cited from a source.',
-        tools: [STRUCTURING_TOOL],
-        tool_choice: { type: 'tool', name: 'structure_research' },
-        messages: [{ role: 'user', content: `Extract structured data from this investor research:\n\n${researchText}` }],
-      });
-
-      const structureCost = estimateCostUsd(
-        'claude-haiku-4-5-20251001',
-        structureResponse.usage.input_tokens,
-        structureResponse.usage.output_tokens
-      );
-      totalCostUsd += structureCost;
-
-      await costLedgerRepo.insert({
-        agentOrJob: JOB_NAME,
-        packageId: null,
-        projectKey: null,
-        llmModel: 'claude-haiku-4-5-20251001',
-        inputTokens: structureResponse.usage.input_tokens,
-        outputTokens: structureResponse.usage.output_tokens,
-        costUsd: structureCost,
-        estimatedMaxUsd: structureCost,
-        tier: 'background',
-      });
-
-      // Extract tool use result
-      let structuredData: StructuredResearchOutput | null = null;
-      for (const block of structureResponse.content) {
-        if (block.type === 'tool_use' && block.name === 'structure_research') {
-          structuredData = block.input as StructuredResearchOutput;
-          break;
-        }
-      }
-
-      if (!structuredData) {
-        await upsertFailed(investorObjId, 'Failed to structure research data');
-        res.json({ status: 'failed', investorId, error: 'Failed to structure research data' });
-        return;
-      }
-
-      // Step 6: Upsert completed result
-      const now = new Date();
-      await InvestorResearch.findOneAndUpdate(
-        { investorId: investorObjId },
-        {
-          $set: {
-            thesis: structuredData.thesis,
-            stage: structuredData.stage,
-            checkSize: structuredData.checkSize,
-            geoFocus: structuredData.geoFocus,
-            portfolioCompanies: structuredData.portfolioCompanies || [],
-            recentActivity: structuredData.recentActivity,
-            contact: {
-              name: structuredData.contactName,
-              email: structuredData.contactEmail,
-              confidence: structuredData.contactConfidence,
-              linkedIn: structuredData.contactLinkedIn,
-            },
-            sources: (structuredData.sources || []).map(s => ({
-              url: s.url,
-              title: s.title,
-              fetchedAt: now,
-            })),
-            status: 'completed',
-            error: null,
-            updatedAt: now,
-          },
-        },
-        { upsert: true }
-      );
-
-      // Step 7: Log to audit
-      await writeAuditEvent({
-        actor: 'system',
-        actorType: 'system',
-        eventType: 'job.run',
-        subjectId: investorObjId,
-        payload: {
-          jobName: JOB_NAME,
-          investorId,
-          investorName,
-          durationMs: Date.now() - startTime,
-          totalCostUsd,
-          sourcesFound: structuredData.sources?.length || 0,
-          hasContact: !!structuredData.contactEmail,
-        },
-      });
-
-      logger.info(
-        {
-          investorId,
-          investorName,
-          durationMs: Date.now() - startTime,
-          totalCostUsd,
-          sourcesFound: structuredData.sources?.length || 0,
-        },
-        'investor research completed'
-      );
-
-      res.json({ status: 'completed', investorId });
 
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      logger.error({ error: errorMsg, investorId }, 'investor research failed');
+      logger.error({ error: errorMsg, investorId }, 'investor research trigger failed');
 
       await upsertFailed(investorObjId, errorMsg);
-
-      await writeAuditEvent({
-        actor: 'system',
-        actorType: 'system',
-        eventType: 'job.run',
-        subjectId: investorObjId,
-        payload: {
-          jobName: JOB_NAME,
-          investorId,
-          success: false,
-          error: errorMsg,
-          durationMs: Date.now() - startTime,
-          totalCostUsd,
-        },
-      });
 
       res.status(500).json({ status: 'failed', investorId, error: errorMsg });
     }
