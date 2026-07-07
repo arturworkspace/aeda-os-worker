@@ -290,7 +290,7 @@ CONTACT: ${researchData.contactName || 'Not found'}
   let totalOutputTokens = 0;
   let scoringData: ScoringOutput | null = null;
   let attemptCount = 0;
-  const maxAttempts = 2;
+  const maxAttempts = 3;
 
   while (attemptCount < maxAttempts && !scoringData) {
     attemptCount++;
