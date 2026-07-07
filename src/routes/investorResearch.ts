@@ -518,6 +518,68 @@ async function runResearchAsync(
 export function createInvestorResearchRouter(): Router {
   const router = Router();
 
+  router.post('/rescore', async (req: Request, res: Response) => {
+    const provided = req.headers['x-trigger-secret'];
+    const expected = process.env['TRIGGER_SECRET'];
+    if (!expected || provided !== expected) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { investorId } = req.body as { investorId?: string };
+    if (!investorId || !Types.ObjectId.isValid(investorId)) {
+      res.status(400).json({ error: 'Invalid investorId' });
+      return;
+    }
+
+    const investorObjId = new Types.ObjectId(investorId);
+
+    try {
+      const existingResearch = await InvestorResearch.findOne({ investorId: investorObjId }).exec();
+
+      if (!existingResearch || existingResearch.status !== 'completed') {
+        res.status(400).json({ status: 'failed', error: 'No completed research found to score' });
+        return;
+      }
+
+      if (!existingResearch.thesis && !existingResearch.stage && !existingResearch.checkSize) {
+        res.status(400).json({ status: 'failed', error: 'No completed research found to score' });
+        return;
+      }
+
+      const investor = await Investor.findById(investorObjId).exec();
+      if (!investor) {
+        res.status(404).json({ status: 'failed', error: 'Investor not found' });
+        return;
+      }
+
+      const researchData: StructuredResearchOutput = {
+        thesis: existingResearch.thesis,
+        stage: existingResearch.stage,
+        checkSize: existingResearch.checkSize,
+        geoFocus: existingResearch.geoFocus,
+        portfolioCompanies: existingResearch.portfolioCompanies || [],
+        recentActivity: existingResearch.recentActivity,
+        contactName: existingResearch.contact?.name || null,
+        contactEmail: existingResearch.contact?.email || null,
+        contactConfidence: existingResearch.contact?.confidence || null,
+        contactLinkedIn: existingResearch.contact?.linkedIn || null,
+        sources: (existingResearch.sources || []).map(s => ({ url: s.url, title: s.title })),
+      };
+
+      res.json({ status: 'scoring', investorId });
+
+      scoreInvestorFit(investorObjId, investorId, investor.name, researchData).catch((err) => {
+        logger.error({ error: err instanceof Error ? err.message : String(err), investorId }, 'rescore failed');
+      });
+
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      logger.error({ error: errorMsg, investorId }, 'rescore endpoint failed');
+      res.status(500).json({ status: 'failed', error: errorMsg });
+    }
+  });
+
   router.post('/trigger', async (req: Request, res: Response) => {
     const provided = req.headers['x-trigger-secret'];
     const expected = process.env['TRIGGER_SECRET'];
