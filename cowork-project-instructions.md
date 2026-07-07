@@ -1,5 +1,5 @@
 # aeda OS — Project Instructions
-Last updated: July 6, 2026 — Slices 1–5B live, Slice 6 active, Slice 7 (Outreach Sequencer) scoped, pending build
+Last updated: July 7, 2026 — Slices 1–5B live, Slice 6 active, Slice 7 (Outreach Sequencer) scoped, pending build
 
 ## Two Codebases
 
@@ -207,6 +207,7 @@ Marcel van Oost, Arthur Bedel, Simon Taylor, Nic Carter, Nathan Sexer, Jeremy Al
 | system.costRollup | Daily 03:30 | Cost aggregation |
 | processInboundEmail | On-demand | Email processing |
 | hasmik.weeklyIntelligence | Monday 19:00 Prague | Full intelligence scan (3 phases) — confirmed against `hasmik.weeklyIntelligence.ts` line 563 |
+| investor.followUpScheduler | Daily 08:00 Prague | Checks investors for due follow-ups, generates draft in os_email_drafts |
 | outreach.processSequences | Daily (planned) | Slice 7 — not yet implemented |
 
 Manual trigger: POST /jobs/hasmik-intelligence/trigger on Railway
@@ -231,6 +232,7 @@ Or via workspace: /knowledge → Intelligence tab → "Run @hasmik now"
 | expenses | Expense tracker |
 | vaultdocuments | Vault (full documents) |
 | os_outreach_sequences | Slice 7 — planned, not yet created |
+| os_investor_research | Per-investor research (thesis, contact, sources) |
 
 ## Knowledge Base Architecture
 
@@ -264,6 +266,8 @@ Partners: Bridge.xyz (EU on-ramp) | Sky Labs (Armenia) | Sumsub (KYC)
 Ground truth: Wise exited Armenia corridor 2024, has not returned
 
 **Financials flagged stale:** Burn $31K/mo, Cash $107K, Runway 3.4mo, and the Y0–Y5 revenue curve are all sourced to Model v9 as of May 10, 2026. Not refreshed this session. Confirm current figures with @arshak before using them in any investor-facing material — this was explicitly flagged during Slice 7 scoping and is still open.
+
+**Fundraising timeline:** Target is now autumn 2026 (not June 2026 as previously stated). Confirmed 2026-07-07.
 
 ## Known Backlog (non-critical)
 - Duplicate key error on inbox write — non-blocking
