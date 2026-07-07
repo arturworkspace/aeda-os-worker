@@ -616,6 +616,123 @@ async function runResearchAsync(
   }
 }
 
+async function processBulkResearch(
+  investors: { _id: Types.ObjectId; name: string; firm: string }[]
+): Promise<void> {
+  const CONCURRENCY = 2;
+  const startTime = Date.now();
+  let processed = 0;
+  let skippedAlreadyDone = 0;
+  let budgetBlocked = 0;
+  let totalCostUsd = 0;
+
+  const processOne = async (inv: { _id: Types.ObjectId; name: string; firm: string }) => {
+    const investorId = inv._id.toHexString();
+
+    // Check budget before each investor
+    const monthToDateCost = await costLedgerRepo.getMonthToDateTotal();
+    if (monthToDateCost >= MONTHLY_RESEARCH_BUDGET_USD) {
+      budgetBlocked++;
+      logger.warn({ investorId, monthToDateCost, budget: MONTHLY_RESEARCH_BUDGET_USD }, 'bulk: budget exceeded, skipping investor');
+      return 'budget';
+    }
+
+    // Double-check status (may have changed since initial query)
+    const research = await InvestorResearch.findOne({ investorId: inv._id }).lean().exec();
+    if (research?.status === 'running') {
+      skippedAlreadyDone++;
+      return 'skip';
+    }
+    if (research?.status === 'completed' && research.relevanceScore) {
+      skippedAlreadyDone++;
+      return 'skip';
+    }
+
+    // Mark as running
+    await InvestorResearch.findOneAndUpdate(
+      { investorId: inv._id },
+      {
+        $set: { status: 'running', error: null, updatedAt: new Date() },
+        $setOnInsert: {
+          investorId: inv._id,
+          thesis: null,
+          stage: null,
+          checkSize: null,
+          geoFocus: null,
+          portfolioCompanies: [],
+          recentActivity: null,
+          contact: { name: null, email: null, confidence: null, linkedIn: null },
+          sources: [],
+          createdAt: new Date(),
+        },
+      },
+      { upsert: true }
+    );
+
+    // Run the actual research (reuses existing logic)
+    try {
+      await runResearchAsync(inv._id, investorId, inv.name, inv.firm);
+      processed++;
+      return 'done';
+    } catch (err) {
+      logger.error({ error: err instanceof Error ? err.message : String(err), investorId }, 'bulk: research failed for investor');
+      return 'error';
+    }
+  };
+
+  // Process with concurrency limit of 2
+  const queue = [...investors];
+  const running: Promise<void>[] = [];
+
+  while (queue.length > 0 || running.length > 0) {
+    // Check if we should stop due to budget
+    if (budgetBlocked > 0 && queue.length > 0) {
+      // Budget exceeded, skip remaining
+      budgetBlocked += queue.length;
+      queue.length = 0;
+    }
+
+    // Fill up to CONCURRENCY
+    while (running.length < CONCURRENCY && queue.length > 0) {
+      const inv = queue.shift()!;
+      const promise = processOne(inv).then(() => {
+        const idx = running.indexOf(promise);
+        if (idx >= 0) running.splice(idx, 1);
+      });
+      running.push(promise);
+    }
+
+    // Wait for at least one to complete
+    if (running.length > 0) {
+      await Promise.race(running);
+    }
+  }
+
+  // Get final cost for this batch
+  const endCost = await costLedgerRepo.getMonthToDateTotal();
+  totalCostUsd = endCost;
+
+  await writeAuditEvent({
+    actor: 'system',
+    actorType: 'system',
+    eventType: 'job.run',
+    payload: {
+      jobName: JOB_NAME,
+      action: 'bulk-research',
+      processed,
+      skippedAlreadyDone,
+      budgetBlocked,
+      totalCostUsd,
+      durationMs: Date.now() - startTime,
+    },
+  });
+
+  logger.info(
+    { processed, skippedAlreadyDone, budgetBlocked, totalCostUsd, durationMs: Date.now() - startTime },
+    'bulk research batch completed'
+  );
+}
+
 export function createInvestorResearchRouter(): Router {
   const router = Router();
 
@@ -677,6 +794,44 @@ export function createInvestorResearchRouter(): Router {
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       logger.error({ error: errorMsg, investorId }, 'rescore endpoint failed');
+      res.status(500).json({ status: 'failed', error: errorMsg });
+    }
+  });
+
+router.post('/bulk-trigger', async (req: Request, res: Response) => {
+    const provided = req.headers['x-trigger-secret'];
+    const expected = process.env['TRIGGER_SECRET'];
+    if (!expected || provided !== expected) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const allInvestors = await Investor.find({}, { _id: 1, name: 1, firm: 1 }).lean().exec();
+      const totalInvestors = allInvestors.length;
+
+      const investorsNeedingWork: { _id: Types.ObjectId; name: string; firm: string }[] = [];
+
+      for (const inv of allInvestors) {
+        const research = await InvestorResearch.findOne({ investorId: inv._id }).lean().exec();
+        if (research?.status === 'running') continue;
+        if (research?.status === 'completed' && research.relevanceScore) continue;
+        investorsNeedingWork.push({ _id: inv._id, name: inv.name, firm: inv.firm || '' });
+      }
+
+      const count = investorsNeedingWork.length;
+      res.json({ status: 'queued', totalInvestors, count });
+
+      if (count === 0) return;
+
+      // Fire-and-forget: process batch async with concurrency limit
+      processBulkResearch(investorsNeedingWork).catch((err) => {
+        logger.error({ error: err instanceof Error ? err.message : String(err) }, 'bulk research batch failed');
+      });
+
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      logger.error({ error: errorMsg }, 'bulk-trigger endpoint failed');
       res.status(500).json({ status: 'failed', error: errorMsg });
     }
   });
