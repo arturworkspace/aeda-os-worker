@@ -8,6 +8,7 @@ import { loadApprovalMatrix, logApprovalMatrixLoaded } from './core/stateMachine
 import { defineAllJobs, scheduleAllJobs } from './jobs/index.js';
 import { registerRoutes } from './routes/index.js';
 import { initGmailClient, ensurePendingSendLabel } from './services/gmail.js';
+import { initJuliaGmailClient } from './services/juliaGmail.js';
 import { logger } from './logger.js';
 
 let agenda: Agenda | null = null;
@@ -78,11 +79,20 @@ async function main(): Promise<void> {
   try {
     initGmailClient();
     await ensurePendingSendLabel();
-    logger.info('gmail client initialized');
+    logger.info('gmail client initialized (artur@aeda.am)');
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
     console.error('step failed: initGmailClient -', err.message, err.stack);
     logger.warn({ err: err.message }, 'gmail init failed, continuing without gmail');
+  }
+
+  try {
+    initJuliaGmailClient();
+    logger.info('julia gmail client initialized');
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.error('step failed: initJuliaGmailClient -', err.message, err.stack);
+    logger.warn({ err: err.message }, 'julia gmail init failed, continuing without julia gmail');
   }
 
   const app = express();

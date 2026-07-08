@@ -10,6 +10,7 @@ import { writeAuditEvent } from '../core/auditLog.js';
 import { estimateCostUsd } from '../config/pricing.js';
 import { logger } from '../logger.js';
 import { getPersona } from '../agents/personas.js';
+import { isJuliaGmailConfigured, juliaCreateDraft } from '../services/juliaGmail.js';
 
 const MONTHLY_RESEARCH_BUDGET_USD = 5;
 const JOB_NAME = 'investor-research';
@@ -1023,6 +1024,33 @@ CONTACT:
       cost_usd: 0,
     });
     await inboxItem.save();
+
+    // Push draft to Julia's Gmail account (best-effort, non-blocking)
+    if (isJuliaGmailConfigured() && toEmail) {
+      try {
+        const gmailResult = await juliaCreateDraft(
+          toEmail,
+          parsedDraft.subjectOptions[0] || 'Introduction from aeda',
+          parsedDraft.body
+        );
+        // Update the email draft with Gmail IDs
+        await emailDraftRepo.updateGmailInfo(
+          emailDraft._id as Types.ObjectId,
+          gmailResult.draftId,
+          gmailResult.messageId
+        );
+        logger.info(
+          { investorId, gmailDraftId: gmailResult.draftId },
+          'first-email draft pushed to julia gmail'
+        );
+      } catch (gmailErr) {
+        const gmailErrMsg = gmailErr instanceof Error ? gmailErr.message : String(gmailErr);
+        logger.error(
+          { error: gmailErrMsg, investorId },
+          'failed to push first-email draft to julia gmail (continuing without gmail)'
+        );
+      }
+    }
 
     await writeAuditEvent({
       actor: 'julia',
