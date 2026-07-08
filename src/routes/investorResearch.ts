@@ -447,14 +447,11 @@ CONTACT: ${researchData.contactName || 'Not found'}
   );
 }
 
-// TEMPORARY TEST CODE: researchModel param added for Haiku vs Sonnet A/B comparison.
-// Not meant to stay long-term as a public parameter. Remove after testing concludes.
 async function runResearchAsync(
   investorObjId: Types.ObjectId,
   investorId: string,
   investorName: string,
-  investorFirm: string,
-  researchModel: 'sonnet' | 'haiku' = 'sonnet'
+  investorFirm: string
 ): Promise<void> {
   const startTime = Date.now();
   let totalCostUsd = 0;
@@ -464,12 +461,10 @@ async function runResearchAsync(
       ? `Research the investor "${investorName}" at "${investorFirm}" for startup investment fit assessment.`
       : `Research the investor "${investorName}" for startup investment fit assessment.`;
 
-    // TEMPORARY TEST CODE: model selection for A/B comparison
-    const modelId = researchModel === 'haiku' ? 'claude-haiku-4-5-20251001' : 'claude-sonnet-4-6';
-    logger.info({ investorId, investorName, investorFirm, researchModel, modelId }, 'starting investor research (async)');
+    logger.info({ investorId, investorName, investorFirm }, 'starting investor research (async)');
 
     const researchResponse = await anthropic.messages.create({
-      model: modelId,
+      model: 'claude-sonnet-4-6',
       max_tokens: 4096,
       system: [
         {
@@ -482,7 +477,7 @@ async function runResearchAsync(
       messages: [{ role: 'user', content: researchQuery }],
     });
 
-    const researchCost = estimateCostUsd(modelId, {
+    const researchCost = estimateCostUsd('claude-sonnet-4-6', {
       input_tokens: researchResponse.usage.input_tokens,
       output_tokens: researchResponse.usage.output_tokens,
       cache_creation_input_tokens: (researchResponse.usage as { cache_creation_input_tokens?: number }).cache_creation_input_tokens,
@@ -494,7 +489,7 @@ async function runResearchAsync(
       agentOrJob: JOB_NAME,
       packageId: null,
       projectKey: null,
-      llmModel: modelId,
+      llmModel: 'claude-sonnet-4-6',
       inputTokens: researchResponse.usage.input_tokens,
       outputTokens: researchResponse.usage.output_tokens,
       costUsd: researchCost,
@@ -580,7 +575,6 @@ async function runResearchAsync(
           })),
           status: 'completed',
           error: null,
-          researchModel,
           updatedAt: now,
         },
       },
@@ -596,7 +590,6 @@ async function runResearchAsync(
         jobName: JOB_NAME,
         investorId,
         investorName,
-        researchModel,
         durationMs: Date.now() - startTime,
         totalCostUsd,
         sourcesFound: structuredData.sources?.length || 0,
@@ -1271,9 +1264,6 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
     }
   });
 
-  // TEMPORARY TEST CODE: model param added for Haiku vs Sonnet A/B comparison.
-  // Pass { model: "haiku" } in request body to use Haiku instead of Sonnet for research.
-  // Default behavior unchanged: Sonnet for all callers that don't pass the param.
   router.post('/trigger', async (req: Request, res: Response) => {
     const provided = req.headers['x-trigger-secret'];
     const expected = process.env['TRIGGER_SECRET'];
@@ -1282,13 +1272,11 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
       return;
     }
 
-    const { investorId, model } = req.body as { investorId?: string; model?: string };
+    const { investorId } = req.body as { investorId?: string };
     if (!investorId || !Types.ObjectId.isValid(investorId)) {
       res.status(400).json({ error: 'Invalid investorId' });
       return;
     }
-    // TEMPORARY: Only "haiku" triggers the A/B test; anything else (including undefined) = Sonnet
-    const researchModel: 'sonnet' | 'haiku' = model === 'haiku' ? 'haiku' : 'sonnet';
 
     const investorObjId = new Types.ObjectId(investorId);
 
@@ -1350,10 +1338,10 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
       }
 
       // Step 4: Respond immediately, then run research async
-      res.json({ status: 'running', investorId, researchModel });
+      res.json({ status: 'running', investorId });
 
       // Fire-and-forget: run research in background
-      runResearchAsync(investorObjId, investorId, investorName, investorFirm, researchModel).catch((err) => {
+      runResearchAsync(investorObjId, investorId, investorName, investorFirm).catch((err) => {
         logger.error({ error: err instanceof Error ? err.message : String(err), investorId }, 'unhandled error in async research');
       });
 
