@@ -100,11 +100,11 @@ const STRUCTURING_TOOL = {
   },
 };
 
-const AEDA_COMPANY_PROFILE = `aeda is a non-custodial EURC stablecoin infrastructure company for the EU-Armenia corridor.
+const AEDA_COMPANY_PROFILE = `aeda is a non-custodial EURC stablecoin infrastructure company for the EU/US <> Eastern Europe & Central Asia (EECA) corridor.
 Pre-seed stage startup based in Prague, Czech Republic.
-Geographic focus: EU and EECA (Eastern Europe, Caucasus, Armenia).
+Geographic focus: EU, US, and EECA (Eastern Europe, Caucasus, Central Asia).
 Technology-network positioning — NOT a payment processor, CASP, VASP, or EMI.
-Business model: infrastructure layer enabling EUR-AMD corridor transfers via EURC stablecoin.`;
+Business model: infrastructure layer enabling cross-border corridor transfers via EURC stablecoin.`;
 
 const SCORING_SYSTEM_PROMPT = `You are an investor fit analyst for aeda.
 
@@ -120,7 +120,7 @@ Score each dimension 1-10 with mandatory one-sentence reasoning:
 - checkSize: Is their typical check size appropriate for pre-seed (~$100K-$500K ideal)?
 - portfolio: Do they have relevant portfolio companies (fintech, crypto, payments, infrastructure)?
 - impact: How much could they help beyond capital (intros, expertise, reputation)?
-- network: Do they have connections relevant to EU-Armenia corridor or fintech/crypto sector?
+- network: Do they have connections relevant to EU/EECA corridor or fintech/crypto sector?
 
 Also provide:
 - overallPriority: High/Medium/Low holistic assessment
@@ -756,6 +756,9 @@ ${AEDA_COMPANY_PROFILE}
 
 CRITICAL — FINANCIAL FIGURES:
 For any specific financial metric (burn rate, cash position, runway months, revenue, funding target amount, traction numbers), you MUST use the exact placeholder text "[PENDING FINANCIAL UPDATE]" instead of inventing or inferring a number. This placeholder will be filled in by a human before sending. Do NOT guess, estimate, or make up any financial figures.
+
+CRITICAL — GEOGRAPHIC POSITIONING:
+Never name Armenia specifically in the email. aeda's positioning is the broader EU/US <> Eastern Europe & Central Asia (EECA) corridor, not a single country. Do not say "EU-Armenia corridor," "EUR-AMD," or reference Armenia by name.
 
 Return your response as JSON with exactly these fields:
 {
