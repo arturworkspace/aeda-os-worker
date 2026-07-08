@@ -1,12 +1,14 @@
 import { Router, Request, Response } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import { Types } from 'mongoose';
-import { InvestorResearch } from '../db/schemas/investorResearch.js';
-import { Investor } from '../db/schemas/investor.js';
+import { InvestorResearch, IInvestorResearchDocument } from '../db/schemas/investorResearch.js';
+import { Investor, IInvestorDocument } from '../db/schemas/investor.js';
 import { costLedgerRepo } from '../db/repos/costLedger.repo.js';
+import { emailDraftRepo } from '../db/repos/emailDraft.repo.js';
 import { writeAuditEvent } from '../core/auditLog.js';
 import { estimateCostUsd } from '../config/pricing.js';
 import { logger } from '../logger.js';
+import { getPersona } from '../agents/personas.js';
 
 const MONTHLY_RESEARCH_BUDGET_USD = 5;
 const JOB_NAME = 'investor-research';
@@ -733,6 +735,299 @@ async function processBulkResearch(
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// FIRST-OUTREACH EMAIL DRAFTING
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const FIRST_EMAIL_DRAFTING_SYSTEM = `You are Julia, aeda's Senior Fundraising & Investor Relations Agent. You draft investor outreach emails in Artur's voice.
+
+When drafting first-outreach emails:
+- Write in first person as Artur (CEO) — direct, evidence-driven, no hype
+- Keep the email concise (150-200 words max)
+- Reference specific investor thesis fit based on the research provided
+- Always use lowercase "aeda"
+- Personalize based on the investor's portfolio, thesis, recent activity, or geographic focus
+- Lead with the strongest connection point (thesis alignment, portfolio relevance, etc.)
+
+COMPANY PROFILE:
+${AEDA_COMPANY_PROFILE}
+
+CRITICAL — FINANCIAL FIGURES:
+For any specific financial metric (burn rate, cash position, runway months, revenue, funding target amount, traction numbers), you MUST use the exact placeholder text "[PENDING FINANCIAL UPDATE]" instead of inventing or inferring a number. This placeholder will be filled in by a human before sending. Do NOT guess, estimate, or make up any financial figures.
+
+Return your response as JSON with exactly these fields:
+{
+  "subjectOptions": ["Subject line option 1", "Subject line option 2", "Subject line option 3"],
+  "body": "The email body text...",
+  "personalizationReasoning": "1-2 sentences explaining what specific research fact motivated the angle taken"
+}`;
+
+interface FirstEmailDraftOutput {
+  subjectOptions: string[];
+  body: string;
+  personalizationReasoning: string;
+}
+
+function parseFirstEmailDraftResponse(text: string): FirstEmailDraftOutput | null {
+  try {
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+      const subjectOptions = Array.isArray(parsed['subjectOptions'])
+        ? (parsed['subjectOptions'] as string[]).filter(s => typeof s === 'string')
+        : [];
+      const body = typeof parsed['body'] === 'string' ? parsed['body'] : '';
+      const personalizationReasoning = typeof parsed['personalizationReasoning'] === 'string'
+        ? parsed['personalizationReasoning']
+        : '';
+
+      if (subjectOptions.length === 0 || !body) {
+        return null;
+      }
+
+      return { subjectOptions, body, personalizationReasoning };
+    }
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
+async function scoreEmailPersonalizationQuality(
+  body: string,
+  personalizationReasoning: string
+): Promise<{ score: number; reasoning: string; costUsd: number }> {
+  const response = await anthropic.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 256,
+    system: `You are an email quality reviewer. Score the personalization quality of this investor outreach email on a scale of 1-10.
+
+A high score (8-10) means:
+- The email references specific, verifiable facts about the investor (portfolio companies, thesis, recent deals)
+- The connection to aeda is clearly articulated based on these facts
+- It does NOT use generic phrases like "I noticed you invest in fintech" without specifics
+
+A low score (1-4) means:
+- Generic template language with no investor-specific details
+- Vague claims of "fit" without evidence
+- Could be sent to any investor without changes
+
+Return JSON: {"score": <1-10>, "reasoning": "<one sentence explanation>"}`,
+    messages: [{
+      role: 'user',
+      content: `Email body:\n${body}\n\nPersonalization reasoning:\n${personalizationReasoning}`,
+    }],
+  });
+
+  const costUsd = estimateCostUsd(
+    'claude-haiku-4-5-20251001',
+    response.usage.input_tokens,
+    response.usage.output_tokens
+  );
+
+  let score = 5;
+  let reasoning = 'Could not parse quality score';
+
+  const textBlock = response.content.find(b => b.type === 'text');
+  if (textBlock && textBlock.type === 'text') {
+    try {
+      const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+        if (typeof parsed['score'] === 'number') {
+          score = Math.max(1, Math.min(10, parsed['score']));
+        }
+        if (typeof parsed['reasoning'] === 'string') {
+          reasoning = parsed['reasoning'];
+        }
+      }
+    } catch {
+      // keep defaults
+    }
+  }
+
+  return { score, reasoning, costUsd };
+}
+
+async function runFirstEmailDraftAsync(
+  investorObjId: Types.ObjectId,
+  investorId: string,
+  investor: IInvestorDocument,
+  research: IInvestorResearchDocument
+): Promise<void> {
+  const startTime = Date.now();
+  let totalCostUsd = 0;
+
+  try {
+    const julia = getPersona('julia');
+    if (!julia) {
+      logger.error({ investorId }, 'julia persona not found');
+      return;
+    }
+
+    // Build context from research
+    const relevanceScore = research.relevanceScore;
+    const researchContext = `
+INVESTOR: ${investor.name}
+FIRM: ${investor.firm || 'Unknown'}
+TYPE: ${investor.type || 'VC'}
+
+RESEARCH FINDINGS:
+- Thesis: ${research.thesis || 'Not found'}
+- Stage focus: ${research.stage || 'Not found'}
+- Check size: ${research.checkSize || 'Not found'}
+- Geographic focus: ${research.geoFocus?.join(', ') || 'Not found'}
+- Portfolio companies: ${research.portfolioCompanies?.length ? research.portfolioCompanies.join(', ') : 'None found'}
+- Recent activity: ${research.recentActivity || 'Not found'}
+
+RELEVANCE SCORING:
+- Overall priority: ${relevanceScore?.overallPriority || 'Not scored'}
+- Best outreach angle: ${relevanceScore?.bestOutreachAngle || 'Not available'}
+- Best contact: ${relevanceScore?.bestContactPerson || research.contact?.name || 'Not found'}
+
+CONTACT:
+- Name: ${research.contact?.name || 'Not found'}
+- Email: ${research.contact?.email || investor.email || 'Not found'}
+- Confidence: ${research.contact?.confidence || 'unknown'}
+`.trim();
+
+    // Generate draft via Sonnet
+    const draftResponse = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      system: FIRST_EMAIL_DRAFTING_SYSTEM,
+      messages: [{
+        role: 'user',
+        content: `Draft a first-outreach email to this investor:\n\n${researchContext}`,
+      }],
+    });
+
+    const draftCost = estimateCostUsd(
+      'claude-sonnet-4-6',
+      draftResponse.usage.input_tokens,
+      draftResponse.usage.output_tokens
+    );
+    totalCostUsd += draftCost;
+
+    await costLedgerRepo.insert({
+      agentOrJob: 'investor-email-draft',
+      packageId: null,
+      projectKey: null,
+      llmModel: 'claude-sonnet-4-6',
+      inputTokens: draftResponse.usage.input_tokens,
+      outputTokens: draftResponse.usage.output_tokens,
+      costUsd: draftCost,
+      estimatedMaxUsd: draftCost,
+      tier: 'production',
+    });
+
+    // Parse response
+    let draftText = '';
+    for (const block of draftResponse.content) {
+      if (block.type === 'text') {
+        draftText += block.text;
+      }
+    }
+
+    const parsedDraft = parseFirstEmailDraftResponse(draftText);
+    if (!parsedDraft) {
+      logger.error({ investorId, rawResponse: draftText.slice(0, 500) }, 'failed to parse draft response');
+      return;
+    }
+
+    // Run quality-gate scoring
+    const qualityResult = await scoreEmailPersonalizationQuality(
+      parsedDraft.body,
+      parsedDraft.personalizationReasoning
+    );
+    totalCostUsd += qualityResult.costUsd;
+
+    await costLedgerRepo.insert({
+      agentOrJob: 'investor-email-draft',
+      packageId: null,
+      projectKey: null,
+      llmModel: 'claude-haiku-4-5-20251001',
+      inputTokens: 0, // Already counted in qualityResult.costUsd
+      outputTokens: 0,
+      costUsd: qualityResult.costUsd,
+      estimatedMaxUsd: qualityResult.costUsd,
+      tier: 'background',
+    });
+
+    // Log warning if quality is low but still save
+    if (qualityResult.score < 6) {
+      logger.warn(
+        { investorId, qualityScore: qualityResult.score, reasoning: qualityResult.reasoning },
+        'first-email draft has low personalization quality score'
+      );
+    }
+
+    // Determine email address and contact confidence
+    const toEmail = research.contact?.email || investor.email || '';
+    const contactConfidence = research.contact?.confidence || null;
+
+    // Save draft
+    await emailDraftRepo.create({
+      drafted_by_agent: 'julia',
+      to: toEmail,
+      subject: parsedDraft.subjectOptions[0] || 'Introduction from aeda',
+      body: parsedDraft.body,
+      thread_context: `First outreach to ${investor.name} (${investor.firm || 'Unknown'})`,
+      investorId: investorObjId,
+      draftType: 'first_email',
+      subjectOptions: parsedDraft.subjectOptions,
+      personalizationReasoning: parsedDraft.personalizationReasoning,
+      qualityScore: qualityResult.score,
+      contactConfidence,
+    });
+
+    await writeAuditEvent({
+      actor: 'julia',
+      actorType: 'agent',
+      eventType: 'investor.first_email_draft_created',
+      subjectId: investorObjId,
+      payload: {
+        investorId,
+        investorName: investor.name,
+        qualityScore: qualityResult.score,
+        qualityReasoning: qualityResult.reasoning,
+        contactConfidence,
+        totalCostUsd,
+        durationMs: Date.now() - startTime,
+      },
+    });
+
+    logger.info(
+      {
+        investorId,
+        investorName: investor.name,
+        qualityScore: qualityResult.score,
+        totalCostUsd,
+        durationMs: Date.now() - startTime,
+      },
+      'first-email draft created'
+    );
+
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    logger.error({ error: errorMsg, investorId }, 'first-email draft generation failed');
+
+    await writeAuditEvent({
+      actor: 'julia',
+      actorType: 'agent',
+      eventType: 'investor.first_email_draft_created',
+      subjectId: investorObjId,
+      payload: {
+        investorId,
+        success: false,
+        error: errorMsg,
+        totalCostUsd,
+        durationMs: Date.now() - startTime,
+      },
+    });
+  }
+}
+
 export function createInvestorResearchRouter(): Router {
   const router = Router();
 
@@ -923,6 +1218,85 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
 
       await upsertFailed(investorObjId, errorMsg);
 
+      res.status(500).json({ status: 'failed', investorId, error: errorMsg });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // DRAFT-EMAIL: Generate first-outreach email draft for an investor
+  // ═══════════════════════════════════════════════════════════════════════════
+  router.post('/draft-email', async (req: Request, res: Response) => {
+    const provided = req.headers['x-trigger-secret'];
+    const expected = process.env['TRIGGER_SECRET'];
+    if (!expected || provided !== expected) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { investorId } = req.body as { investorId?: string };
+    if (!investorId || !Types.ObjectId.isValid(investorId)) {
+      res.status(400).json({ error: 'Invalid investorId' });
+      return;
+    }
+
+    const investorObjId = new Types.ObjectId(investorId);
+
+    try {
+      // Step 1: Look up investor
+      const investor = await Investor.findById(investorObjId).exec();
+      if (!investor) {
+        res.status(404).json({ status: 'failed', error: 'Investor not found' });
+        return;
+      }
+
+      // Step 2: Look up research — must exist and be completed with relevanceScore
+      const research = await InvestorResearch.findOne({ investorId: investorObjId }).exec();
+      if (!research || research.status !== 'completed') {
+        res.status(400).json({
+          status: 'failed',
+          error: 'Research must be completed before drafting an email',
+        });
+        return;
+      }
+
+      if (!research.relevanceScore) {
+        res.status(400).json({
+          status: 'failed',
+          error: 'Research must be completed before drafting an email',
+        });
+        return;
+      }
+
+      // Step 3: Check if draft already exists
+      const existingDraft = await emailDraftRepo.findByInvestorAndDraftType(investorObjId, 'first_email');
+      if (existingDraft) {
+        res.json({
+          status: 'exists',
+          investorId,
+          message: 'First-email draft already exists for this investor',
+        });
+        return;
+      }
+
+      // Step 4: Check budget
+      const monthToDateCost = await costLedgerRepo.getMonthToDateTotal();
+      if (monthToDateCost >= MONTHLY_RESEARCH_BUDGET_USD) {
+        logger.warn({ monthToDateCost, budget: MONTHLY_RESEARCH_BUDGET_USD }, 'monthly budget exceeded for draft-email');
+        res.json({ status: 'failed', investorId, error: 'Monthly budget cap reached' });
+        return;
+      }
+
+      // Step 5: Respond immediately, then run drafting async
+      res.json({ status: 'drafting', investorId });
+
+      // Fire-and-forget: run draft generation in background
+      runFirstEmailDraftAsync(investorObjId, investorId, investor, research).catch((err) => {
+        logger.error({ error: err instanceof Error ? err.message : String(err), investorId }, 'unhandled error in async draft generation');
+      });
+
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      logger.error({ error: errorMsg, investorId }, 'draft-email endpoint failed');
       res.status(500).json({ status: 'failed', investorId, error: errorMsg });
     }
   });

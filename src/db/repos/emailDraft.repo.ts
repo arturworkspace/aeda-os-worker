@@ -10,6 +10,12 @@ export interface CreateEmailDraftInput {
   thread_context?: string;
   investorId?: Types.ObjectId;
   followUpStage?: 'followup1' | 'followup2';
+  // First-outreach email fields
+  draftType?: 'first_email' | 'followup';
+  subjectOptions?: string[];
+  personalizationReasoning?: string;
+  qualityScore?: number;
+  contactConfidence?: 'verified' | 'inferred' | null;
 }
 
 export const emailDraftRepo = {
@@ -25,6 +31,11 @@ export const emailDraftRepo = {
       created_at: new Date(),
       investorId: input.investorId,
       followUpStage: input.followUpStage,
+      draftType: input.draftType,
+      subjectOptions: input.subjectOptions,
+      personalizationReasoning: input.personalizationReasoning,
+      qualityScore: input.qualityScore,
+      contactConfidence: input.contactConfidence,
     });
     return doc.save();
   },
@@ -36,6 +47,16 @@ export const emailDraftRepo = {
     return EmailDraft.findOne({
       investorId: new Types.ObjectId(investorId.toString()),
       followUpStage,
+    }).exec();
+  },
+
+  async findByInvestorAndDraftType(
+    investorId: Types.ObjectId | string,
+    draftType: 'first_email' | 'followup'
+  ): Promise<IEmailDraftDocument | null> {
+    return EmailDraft.findOne({
+      investorId: new Types.ObjectId(investorId.toString()),
+      draftType,
     }).exec();
   },
 

@@ -19,6 +19,12 @@ export interface IEmailDraft {
   // Investor follow-up metadata (optional)
   investorId?: Types.ObjectId;
   followUpStage?: 'followup1' | 'followup2';
+  // First-outreach email metadata (optional)
+  draftType?: 'first_email' | 'followup';
+  subjectOptions?: string[];
+  personalizationReasoning?: string;
+  qualityScore?: number;
+  contactConfidence?: 'verified' | 'inferred' | null;
 }
 
 export type IEmailDraftDocument = mongoose.HydratedDocument<IEmailDraft>;
@@ -40,6 +46,12 @@ const emailDraftSchema = new Schema<IEmailDraft>(
     // Investor follow-up metadata
     investorId: { type: Schema.Types.ObjectId, ref: 'Investor', required: false },
     followUpStage: { type: String, enum: ['followup1', 'followup2'], required: false },
+    // First-outreach email metadata
+    draftType: { type: String, enum: ['first_email', 'followup'], required: false },
+    subjectOptions: { type: [String], required: false },
+    personalizationReasoning: { type: String, required: false },
+    qualityScore: { type: Number, required: false },
+    contactConfidence: { type: String, enum: ['verified', 'inferred', null], required: false },
   },
   {
     collection: 'os_email_drafts',

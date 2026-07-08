@@ -19,6 +19,7 @@ export const AUDIT_EVENT_TYPES = [
   'gmail.warning',
   'gmail.error',
   'investor.followup_draft_created',
+  'investor.first_email_draft_created',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
