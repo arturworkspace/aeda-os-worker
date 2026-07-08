@@ -967,6 +967,12 @@ CONTACT:
     const toEmail = research.contact?.email || investor.email || '';
     const contactConfidence = research.contact?.confidence || null;
 
+    // Skip if no email address available
+    if (!toEmail) {
+      logger.warn({ investorId, investorName: investor.name }, 'no email address available, cannot create draft');
+      return;
+    }
+
     // Save draft
     const emailDraft = await emailDraftRepo.create({
       drafted_by_agent: 'julia',
