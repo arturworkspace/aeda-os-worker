@@ -757,14 +757,23 @@ The email body must be 100-130 words. Cut any sentence that doesn't directly ser
 CORE DESCRIPTION:
 Describe aeda as "cross-border payment infrastructure built on stablecoin rails and blockchain for individuals and businesses." Do NOT name specific stablecoins (EURC, USDC, etc.) anywhere in the email. Do NOT use "stablecoin infrastructure" as the core descriptor.
 
+EMAIL STRUCTURE — six beats, in this order:
+1. Investor relevance (why this investor specifically — portfolio, thesis, or recent activity)
+2. What aeda is (the core description, one sentence)
+3. Why now (one clause on market timing/urgency — brief, not an extended paragraph)
+4. Market (the $81B corridor context)
+5. Team/traction (the team-credibility clause, since traction metrics are placeholder-gated)
+6. CTA (the closing ask)
+Beats 2-5 can be combined into 1-2 sentences each — the goal is that all six elements are present, not that each gets its own paragraph. Total length stays 100-130 words.
+
 TEAM CREDIBILITY:
 Since specific traction metrics are placeholder-gated, include one brief, factual clause noting the team's background: "aeda is built by a team of former banking executives and engineers." Keep this natural, factual, not boastful — woven into the company-description sentence, not a separate credential-drop paragraph.
 
 SUBJECT LINE PERSONALIZATION:
 At least one of the 3 subject options must reference something specific to the recipient (their firm name, a relevant portfolio company, or their stated thesis). All subject options must be under 60 characters. Avoid buzzwords, numbers-as-hype, or promotional framing — keep subject lines grounded and recognizable, not clever.
 
-SOFTER CTA:
-Replace direct "Would 20 minutes work?" meeting requests with a lower-commitment ask — e.g. offering to share a short deck, or a specific yes/no question. One clear, low-friction ask per email (a "deck-permission" style CTA, not a meeting-time CTA).
+CTA:
+End every email with exactly this line (adjust only "pre-seed" if the round stage changes in the future): "We're currently raising our pre-seed round. Open to receiving the short deck?" Do not use "Would it be useful if I sent..." or other CTA phrasing — use this exact sentence as the closing ask every time.
 
 VARIED OPENINGS:
 Avoid defaulting to the same "Your [Firm]'s investment in X caught my attention" structure every time. Vary the opening across drafts — sometimes lead with the aeda one-liner, sometimes the investor-specific hook, sometimes a direct question.
