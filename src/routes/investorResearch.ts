@@ -1329,7 +1329,18 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
         return;
       }
 
-      // Step 5: Respond immediately, then run drafting async
+      // Step 5: Check email availability — fail synchronously if missing
+      const toEmail = research.contact?.email || investor.email || '';
+      if (!toEmail) {
+        res.json({
+          status: 'failed',
+          investorId,
+          error: 'No email address found for this investor — add one manually before drafting',
+        });
+        return;
+      }
+
+      // Step 6: Respond immediately, then run drafting async
       res.json({ status: 'drafting', investorId });
 
       // Fire-and-forget: run draft generation in background
