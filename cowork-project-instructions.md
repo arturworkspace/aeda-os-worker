@@ -1,5 +1,5 @@
 # aeda OS — Project Instructions
-Last updated: July 7, 2026 — Slices 1–5B live, Slice 6 active, Slice 7 (Outreach Sequencer) scoped, pending build
+Last updated: July 8, 2026 — Slices 1–5B live, Slice 6 active, Slice 7 research/shortlist live, email drafting in progress
 
 ## Two Codebases
 
@@ -161,14 +161,23 @@ Fundraising Intel — /fundraising-intel page:
 - **@karo open items:** four manual verifications outstanding (standard approval flow, agent injection end-to-end)
 - Sidebar structure: INTELLIGENCE (Knowledge, OS Dashboard) / FUNDRAISING (Investors, Intel, Room) / WORK / ROOMS / COMPANY (Vault, Expenses, Finance) / AGENTS
 
-## Slice 7 — Investor Outreach Sequencer (Scoped, not yet built)
+## Slice 7 — Investor Outreach Sequencer (research/shortlist complete and live; email drafting in progress; send/follow-up blocked)
 
-- Goal: run @julia's pre-approved 4-email cadence (Day 1 → 4 → 9 → 14, narek-approved content) against a selected investor list from one place, with CRM-style status per investor
-- Decision this session: draft-preparation is automated, send is human-triggered from Gmail directly (Option 1) — no in-app send button, no gmail.send scope
-- New collection planned: `os_outreach_sequences` — sequenceId, investorId, currentStep (1–4), stepDueDates, draftIds, repliedAt, status (active/stopped/completed)
-- New Agenda.js job planned: `outreach.processSequences` — daily, checks due steps, polls Gmail thread via read-only `threads.get`, Haiku-classifies reply vs auto-reply/bounce, generates next draft via @julia (Sonnet) if no genuine reply, pushes to `os_email_drafts`
-- **Blocked on:** @vagho review of the new read-only Gmail scope before implementation starts
-- Manual "Mark Replied" fallback considered sufficient below ~25–30 concurrent sequences (per @chris); revisit automated reply-detection threshold if list grows past that
+Complete and live in production:
+- CSV bulk import for investor list
+- Investor Analysis dashboard with stage pipeline health and stale investor tracking
+- Investor Research engine: Sonnet with web_search for research + Haiku for structuring; 7-dimension relevance scoring (thesis, stage, geo, check size, portfolio, impact, network) on a 1-10 scale with mandatory reasoning per dimension; confidence tagging via strict:true structured output enum ("verified" / "inferred") tied to citation presence
+- Contact handling: pattern-guessed emails permitted when verified contact not found (Artur's explicit override of @narek's initial objection), flagged confidence:"guessed" with distinct visual treatment; guessed-contact confirmation checkbox must appear BEFORE draft email text (anti-anchoring-bias requirement)
+- Investor Shortlist page (/investors): priority-grouped (High/Medium/Low/Not Researched), discovery-and-evaluation only, no pipeline stage/status shown, bulk "Research All" trigger with concurrency cap of 2 and budget guard
+- Investor Outreach pipeline page (/investors/outreach): stage-based tracking (Outreach, First Contact, Meeting, Due Diligence, Term Sheet, Closed, Passed), separate from Shortlist; "Move to Outreach" workflow transitions investors from Shortlist to this page
+- Reliability: validation + retry (3 attempts) + regex-repair fallback chain for Haiku scoring output; malformed source URL crash fix; research prompt updated to omit unconfirmed source URLs rather than use placeholder text
+- Sidebar nav: "Outreach" positioned between "Investors" and "Intel"
+
+In progress:
+- Email draft generation (@julia) using investor research and relevance score above; Phase 4 email drafts get a personalization quality-gate score (Haiku) before reaching inbox review; financial figure placeholders used for any aeda-specific numbers pending Model v9 refresh
+
+Blocked / not yet started:
+- 4-email cadence (Day 1/4/9/14); reply detection via read-only Gmail threads.get polling; human-triggered sends from Gmail directly — no gmail.send scope, no in-app send button; blocked on @vagho's Gmail scope security review
 
 ## Knowledge Base — @hasmik Weekly Scan
 
