@@ -50,11 +50,14 @@ export function estimateCostUsd(
   }
 
   // Handle object-form usage (with cache fields)
+  // Per Anthropic API docs: input_tokens is ALREADY exclusive of cache tokens.
+  // Total input = input_tokens + cache_creation_input_tokens + cache_read_input_tokens (additive).
+  // Pricing: regular input at 1x, cache creation at 1.25x, cache read at 0.1x.
   if (typeof inputTokensOrUsage === 'object') {
     const usage = inputTokensOrUsage;
     const cacheCreation = usage.cache_creation_input_tokens ?? 0;
     const cacheRead = usage.cache_read_input_tokens ?? 0;
-    const regularInput = usage.input_tokens - cacheCreation - cacheRead;
+    const regularInput = usage.input_tokens; // already excludes cache tokens
 
     const regularInputCost = (regularInput / 1_000_000) * pricing.inputPerMUsd;
     const cacheCreationCost = (cacheCreation / 1_000_000) * pricing.inputPerMUsd * 1.25;
