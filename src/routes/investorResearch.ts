@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { Types } from 'mongoose';
 import { InvestorResearch, IInvestorResearchDocument } from '../db/schemas/investorResearch.js';
 import { Investor, IInvestorDocument } from '../db/schemas/investor.js';
+import { InboxItem } from '../db/schemas/inboxItem.js';
 import { costLedgerRepo } from '../db/repos/costLedger.repo.js';
 import { emailDraftRepo } from '../db/repos/emailDraft.repo.js';
 import { writeAuditEvent } from '../core/auditLog.js';
@@ -967,7 +968,7 @@ CONTACT:
     const contactConfidence = research.contact?.confidence || null;
 
     // Save draft
-    await emailDraftRepo.create({
+    const emailDraft = await emailDraftRepo.create({
       drafted_by_agent: 'julia',
       to: toEmail,
       subject: parsedDraft.subjectOptions[0] || 'Introduction from aeda',
@@ -980,6 +981,42 @@ CONTACT:
       qualityScore: qualityResult.score,
       contactConfidence,
     });
+
+    // Create InboxItem so draft appears in Julia's inbox
+    const inboxItem = new InboxItem({
+      recipient: 'julia@aeda.internal',
+      sender_email: 'system@aeda.internal',
+      sender_name: 'aeda System',
+      subject: `First outreach email drafted for ${investor.name}`,
+      body_raw: '',
+      body_sanitized: '',
+      body_hardened: '',
+      body_text: parsedDraft.body,
+      body_html: '',
+      attachments: [],
+      agent_commentary: `First outreach email ready for review. Investor: ${investor.name} (${investor.firm || 'Unknown'}). Quality score: ${qualityResult.score}/10.`,
+      draft_text: parsedDraft.body,
+      received_at: new Date(),
+      message_id: `investor-first-email-draft-${(emailDraft._id as Types.ObjectId).toHexString()}`,
+      in_reply_to: null,
+      crm_match: {
+        matched: true,
+        investor_id: investorObjId.toHexString(),
+        investor_name: investor.name,
+        matched_on: null,
+      },
+      routing: {
+        artur_classification: 'investor_outreach',
+        routed_to_agent: 'julia',
+        artur_brief: `First outreach draft for ${investor.name}`,
+        lilit_task_id: null,
+      },
+      draft_id: emailDraft._id as Types.ObjectId,
+      processing_status: 'draft_created',
+      processing_error: null,
+      cost_usd: 0,
+    });
+    await inboxItem.save();
 
     await writeAuditEvent({
       actor: 'julia',

@@ -2,6 +2,7 @@ import { Agenda, Job } from 'agenda';
 import { Types } from 'mongoose';
 import { investorRepo } from '../db/repos/investor.repo.js';
 import { emailDraftRepo } from '../db/repos/emailDraft.repo.js';
+import { InboxItem } from '../db/schemas/inboxItem.js';
 import { businessDaysBetween } from '../lib/dates.js';
 import { routedCall, getTextContent } from '../core/modelRouter.js';
 import { writeAuditEvent } from '../core/auditLog.js';
@@ -120,6 +121,42 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
           followUpStage: 'followup1',
         });
 
+        // Create InboxItem so draft appears in Julia's inbox
+        const inboxItem = new InboxItem({
+          recipient: 'julia@aeda.internal',
+          sender_email: 'system@aeda.internal',
+          sender_name: 'aeda System',
+          subject: `Follow-up 1 email drafted for ${investor.name}`,
+          body_raw: '',
+          body_sanitized: '',
+          body_hardened: '',
+          body_text: draftContent.body,
+          body_html: '',
+          attachments: [],
+          agent_commentary: `Follow-up email ready for review. Investor: ${investor.name} (${investor.firm || 'Unknown'})`,
+          draft_text: draftContent.body,
+          received_at: new Date(),
+          message_id: `investor-followup1-draft-${(emailDraft._id as Types.ObjectId).toHexString()}`,
+          in_reply_to: null,
+          crm_match: {
+            matched: true,
+            investor_id: (investor._id as Types.ObjectId).toHexString(),
+            investor_name: investor.name,
+            matched_on: null,
+          },
+          routing: {
+            artur_classification: 'investor_outreach',
+            routed_to_agent: 'julia',
+            artur_brief: `Follow-up 1 draft for ${investor.name}`,
+            lilit_task_id: null,
+          },
+          draft_id: emailDraft._id as Types.ObjectId,
+          processing_status: 'draft_created',
+          processing_error: null,
+          cost_usd: 0,
+        });
+        await inboxItem.save();
+
         // Push to Gmail drafts if configured
         if (isGmailConfigured() && investor.email) {
           try {
@@ -228,6 +265,42 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
           investorId: investor._id as Types.ObjectId,
           followUpStage: 'followup2',
         });
+
+        // Create InboxItem so draft appears in Julia's inbox
+        const inboxItem2 = new InboxItem({
+          recipient: 'julia@aeda.internal',
+          sender_email: 'system@aeda.internal',
+          sender_name: 'aeda System',
+          subject: `Follow-up 2 (final) email drafted for ${investor.name}`,
+          body_raw: '',
+          body_sanitized: '',
+          body_hardened: '',
+          body_text: draftContent.body,
+          body_html: '',
+          attachments: [],
+          agent_commentary: `Final follow-up email ready for review. Investor: ${investor.name} (${investor.firm || 'Unknown'})`,
+          draft_text: draftContent.body,
+          received_at: new Date(),
+          message_id: `investor-followup2-draft-${(emailDraft._id as Types.ObjectId).toHexString()}`,
+          in_reply_to: null,
+          crm_match: {
+            matched: true,
+            investor_id: (investor._id as Types.ObjectId).toHexString(),
+            investor_name: investor.name,
+            matched_on: null,
+          },
+          routing: {
+            artur_classification: 'investor_outreach',
+            routed_to_agent: 'julia',
+            artur_brief: `Follow-up 2 (final) draft for ${investor.name}`,
+            lilit_task_id: null,
+          },
+          draft_id: emailDraft._id as Types.ObjectId,
+          processing_status: 'draft_created',
+          processing_error: null,
+          cost_usd: 0,
+        });
+        await inboxItem2.save();
 
         // Push to Gmail drafts if configured
         if (isGmailConfigured() && investor.email) {
