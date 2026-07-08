@@ -39,10 +39,14 @@ async function refreshJuliaAccessToken(): Promise<void> {
   }
 }
 
+function encodeRfc2047(text: string): string {
+  return `=?UTF-8?B?${Buffer.from(text, 'utf-8').toString('base64')}?=`;
+}
+
 function createRawEmail(to: string, subject: string, body: string): string {
   const headers = [
     `To: ${to}`,
-    `Subject: ${subject}`,
+    `Subject: ${encodeRfc2047(subject)}`,
     `MIME-Version: 1.0`,
     `Content-Type: text/plain; charset="UTF-8"`,
   ];
