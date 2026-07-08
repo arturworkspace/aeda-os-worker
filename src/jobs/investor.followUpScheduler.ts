@@ -15,6 +15,32 @@ export const JOB_NAME = 'investor.followUpScheduler';
 const FOLLOW_UP_1_BUSINESS_DAYS = 5;
 const FOLLOW_UP_2_BUSINESS_DAYS = 7;
 
+// Test mode: env vars to use minute-based thresholds instead of business days
+const FOLLOWUP_1_TEST_MINUTES = process.env['FOLLOWUP_1_TEST_MINUTES']
+  ? parseInt(process.env['FOLLOWUP_1_TEST_MINUTES'], 10)
+  : null;
+const FOLLOWUP_2_TEST_MINUTES = process.env['FOLLOWUP_2_TEST_MINUTES']
+  ? parseInt(process.env['FOLLOWUP_2_TEST_MINUTES'], 10)
+  : null;
+
+function minutesBetween(start: Date, end: Date): number {
+  return Math.floor((end.getTime() - start.getTime()) / 60000);
+}
+
+function shouldTriggerFollowUp1(firstEmailSentAt: Date, now: Date): boolean {
+  if (FOLLOWUP_1_TEST_MINUTES !== null) {
+    return minutesBetween(firstEmailSentAt, now) >= FOLLOWUP_1_TEST_MINUTES;
+  }
+  return businessDaysBetween(firstEmailSentAt, now) >= FOLLOW_UP_1_BUSINESS_DAYS;
+}
+
+function shouldTriggerFollowUp2(followUp1SentAt: Date, now: Date): boolean {
+  if (FOLLOWUP_2_TEST_MINUTES !== null) {
+    return minutesBetween(followUp1SentAt, now) >= FOLLOWUP_2_TEST_MINUTES;
+  }
+  return businessDaysBetween(followUp1SentAt, now) >= FOLLOW_UP_2_BUSINESS_DAYS;
+}
+
 interface DraftResponse {
   subject: string;
   body: string;
@@ -39,33 +65,52 @@ function parseDraftResponse(text: string): DraftResponse {
   };
 }
 
-export function defineJob(agenda: Agenda): void {
-  agenda.define(JOB_NAME, async (job: Job) => {
-    const startTime = Date.now();
-    let success = false;
-    let errorMessage: string | undefined;
-    let draftsCreated = 0;
-    let totalCostUsd = 0;
+export interface FollowUpSchedulerResult {
+  success: boolean;
+  draftsCreated: number;
+  totalCostUsd: number;
+  durationMs: number;
+  error?: string | undefined;
+}
 
-    try {
-      const julia = getPersona('julia');
-      if (!julia) {
-        throw new Error('julia persona not found');
-      }
+export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
+  const startTime = Date.now();
+  let success = false;
+  let errorMessage: string | undefined;
+  let draftsCreated = 0;
+  let totalCostUsd = 0;
 
-      const now = new Date();
+  // Log which mode is active
+  if (FOLLOWUP_1_TEST_MINUTES !== null) {
+    logger.info({ minutes: FOLLOWUP_1_TEST_MINUTES }, 'using TEST MODE: minute threshold for followup1');
+  } else {
+    logger.info({ days: FOLLOW_UP_1_BUSINESS_DAYS }, 'using production business-day threshold for followup1');
+  }
+  if (FOLLOWUP_2_TEST_MINUTES !== null) {
+    logger.info({ minutes: FOLLOWUP_2_TEST_MINUTES }, 'using TEST MODE: minute threshold for followup2');
+  } else {
+    logger.info({ days: FOLLOW_UP_2_BUSINESS_DAYS }, 'using production business-day threshold for followup2');
+  }
 
-      // ═══════════════════════════════════════════════════════════════════
-      // FOLLOW-UP 1: investors needing first follow-up
-      // ═══════════════════════════════════════════════════════════════════
-      const needingFollowUp1 = await investorRepo.findNeedingFollowUp1();
-      logger.info({ count: needingFollowUp1.length }, 'investors checked for follow-up 1');
+  try {
+    const julia = getPersona('julia');
+    if (!julia) {
+      throw new Error('julia persona not found');
+    }
 
-      for (const investor of needingFollowUp1) {
-        if (!investor.firstEmailSentAt) continue;
+    const now = new Date();
 
-        const daysSinceFirst = businessDaysBetween(investor.firstEmailSentAt, now);
-        if (daysSinceFirst < FOLLOW_UP_1_BUSINESS_DAYS) continue;
+    // ═══════════════════════════════════════════════════════════════════
+    // FOLLOW-UP 1: investors needing first follow-up
+    // ═══════════════════════════════════════════════════════════════════
+    const needingFollowUp1 = await investorRepo.findNeedingFollowUp1();
+    logger.info({ count: needingFollowUp1.length }, 'investors checked for follow-up 1');
+
+    for (const investor of needingFollowUp1) {
+      if (!investor.firstEmailSentAt) continue;
+
+      if (!shouldTriggerFollowUp1(investor.firstEmailSentAt, now)) continue;
+      const daysSinceFirst = businessDaysBetween(investor.firstEmailSentAt, now);
 
         // Check if draft already exists (hard cap: never create duplicate)
         const existingDraft = await emailDraftRepo.findByInvestorAndStage(
@@ -209,8 +254,8 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
       for (const investor of needingFollowUp2) {
         if (!investor.followUp1SentAt) continue;
 
+        if (!shouldTriggerFollowUp2(investor.followUp1SentAt, now)) continue;
         const daysSinceFollowUp1 = businessDaysBetween(investor.followUp1SentAt, now);
-        if (daysSinceFollowUp1 < FOLLOW_UP_2_BUSINESS_DAYS) continue;
 
         // Check if draft already exists (hard cap: never create duplicate)
         const existingDraft = await emailDraftRepo.findByInvestorAndStage(
@@ -345,27 +390,39 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
         });
       }
 
-      success = true;
-      logger.info({ draftsCreated, totalCostUsd }, 'follow-up scheduler completed');
-    } catch (error) {
-      errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error({ error: errorMessage }, 'follow-up scheduler failed');
-      throw error;
-    } finally {
-      await writeAuditEvent({
-        actor: 'system',
-        actorType: 'system',
-        eventType: 'job.run',
-        payload: {
-          jobName: JOB_NAME,
-          success,
-          draftsCreated,
-          totalCostUsd,
-          durationMs: Date.now() - startTime,
-          error: errorMessage,
-        },
-      });
-    }
+    success = true;
+    logger.info({ draftsCreated, totalCostUsd }, 'follow-up scheduler completed');
+  } catch (error) {
+    errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, 'follow-up scheduler failed');
+  } finally {
+    await writeAuditEvent({
+      actor: 'system',
+      actorType: 'system',
+      eventType: 'job.run',
+      payload: {
+        jobName: JOB_NAME,
+        success,
+        draftsCreated,
+        totalCostUsd,
+        durationMs: Date.now() - startTime,
+        error: errorMessage,
+      },
+    });
+  }
+
+  return {
+    success,
+    draftsCreated,
+    totalCostUsd,
+    durationMs: Date.now() - startTime,
+    error: errorMessage,
+  };
+}
+
+export function defineJob(agenda: Agenda): void {
+  agenda.define(JOB_NAME, async (_job: Job) => {
+    await runFollowUpScheduler();
   });
 }
 

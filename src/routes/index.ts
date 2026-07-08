@@ -2,6 +2,7 @@ import { Express } from 'express';
 import { Agenda } from 'agenda';
 import { createWebhookRouter } from './webhookInbound.js';
 import { createInvestorResearchRouter } from './investorResearch.js';
+import { runFollowUpScheduler } from '../jobs/investor.followUpScheduler.js';
 import { logger } from '../logger.js';
 
 export function registerRoutes(app: Express, agenda: Agenda): void {
@@ -35,6 +36,25 @@ export function registerRoutes(app: Express, agenda: Agenda): void {
   // Investor research on-demand trigger (protected by secret)
   const investorResearchRouter = createInvestorResearchRouter();
   app.use('/jobs/investor-research', investorResearchRouter);
+
+  // Follow-up scheduler on-demand trigger (protected by secret)
+  app.post('/jobs/investor-followup-scheduler/trigger-now', (req, res, next) => {
+    const provided = req.headers['x-trigger-secret'];
+    const expected = process.env['TRIGGER_SECRET'];
+    if (!expected || provided !== expected) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    next();
+  }, async (_req, res) => {
+    try {
+      const result = await runFollowUpScheduler();
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ error: msg });
+    }
+  });
 
   logger.info('routes registered');
 }
