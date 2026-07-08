@@ -300,6 +300,8 @@ CONTACT: ${researchData.contactName || 'Not found'}
 
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
+  let totalCacheCreationTokens = 0;
+  let totalCacheReadTokens = 0;
   let scoringData: ScoringOutput | null = null;
   let attemptCount = 0;
   let lastRawInput: unknown = null;
@@ -311,6 +313,8 @@ CONTACT: ${researchData.contactName || 'Not found'}
 
     totalInputTokens += scoringResponse.usage.input_tokens;
     totalOutputTokens += scoringResponse.usage.output_tokens;
+    totalCacheCreationTokens += (scoringResponse.usage as { cache_creation_input_tokens?: number }).cache_creation_input_tokens ?? 0;
+    totalCacheReadTokens += (scoringResponse.usage as { cache_read_input_tokens?: number }).cache_read_input_tokens ?? 0;
 
     lastRawInput = null;
     for (const block of scoringResponse.content) {
@@ -384,11 +388,12 @@ CONTACT: ${researchData.contactName || 'Not found'}
     }
   }
 
-  const scoringCost = estimateCostUsd(
-    'claude-haiku-4-5-20251001',
-    totalInputTokens,
-    totalOutputTokens
-  );
+  const scoringCost = estimateCostUsd('claude-haiku-4-5-20251001', {
+    input_tokens: totalInputTokens,
+    output_tokens: totalOutputTokens,
+    cache_creation_input_tokens: totalCacheCreationTokens,
+    cache_read_input_tokens: totalCacheReadTokens,
+  });
 
   await costLedgerRepo.insert({
     agentOrJob: JOB_NAME,
@@ -472,11 +477,12 @@ async function runResearchAsync(
       messages: [{ role: 'user', content: researchQuery }],
     });
 
-    const researchCost = estimateCostUsd(
-      'claude-sonnet-4-6',
-      researchResponse.usage.input_tokens,
-      researchResponse.usage.output_tokens
-    );
+    const researchCost = estimateCostUsd('claude-sonnet-4-6', {
+      input_tokens: researchResponse.usage.input_tokens,
+      output_tokens: researchResponse.usage.output_tokens,
+      cache_creation_input_tokens: (researchResponse.usage as { cache_creation_input_tokens?: number }).cache_creation_input_tokens,
+      cache_read_input_tokens: (researchResponse.usage as { cache_read_input_tokens?: number }).cache_read_input_tokens,
+    });
     totalCostUsd += researchCost;
 
     await costLedgerRepo.insert({
@@ -512,11 +518,12 @@ async function runResearchAsync(
       messages: [{ role: 'user', content: `Extract structured data from this investor research:\n\n${researchText}` }],
     });
 
-    const structureCost = estimateCostUsd(
-      'claude-haiku-4-5-20251001',
-      structureResponse.usage.input_tokens,
-      structureResponse.usage.output_tokens
-    );
+    const structureCost = estimateCostUsd('claude-haiku-4-5-20251001', {
+      input_tokens: structureResponse.usage.input_tokens,
+      output_tokens: structureResponse.usage.output_tokens,
+      cache_creation_input_tokens: (structureResponse.usage as { cache_creation_input_tokens?: number }).cache_creation_input_tokens,
+      cache_read_input_tokens: (structureResponse.usage as { cache_read_input_tokens?: number }).cache_read_input_tokens,
+    });
     totalCostUsd += structureCost;
 
     await costLedgerRepo.insert({
@@ -868,11 +875,12 @@ Return JSON: {"score": <1-10>, "reasoning": "<one sentence explanation>"}`,
     }],
   });
 
-  const costUsd = estimateCostUsd(
-    'claude-haiku-4-5-20251001',
-    response.usage.input_tokens,
-    response.usage.output_tokens
-  );
+  const costUsd = estimateCostUsd('claude-haiku-4-5-20251001', {
+    input_tokens: response.usage.input_tokens,
+    output_tokens: response.usage.output_tokens,
+    cache_creation_input_tokens: (response.usage as { cache_creation_input_tokens?: number }).cache_creation_input_tokens,
+    cache_read_input_tokens: (response.usage as { cache_read_input_tokens?: number }).cache_read_input_tokens,
+  });
 
   let score = 5;
   let reasoning = 'Could not parse quality score';
@@ -957,11 +965,12 @@ CONTACT:
       }],
     });
 
-    const draftCost = estimateCostUsd(
-      'claude-sonnet-4-6',
-      draftResponse.usage.input_tokens,
-      draftResponse.usage.output_tokens
-    );
+    const draftCost = estimateCostUsd('claude-sonnet-4-6', {
+      input_tokens: draftResponse.usage.input_tokens,
+      output_tokens: draftResponse.usage.output_tokens,
+      cache_creation_input_tokens: (draftResponse.usage as { cache_creation_input_tokens?: number }).cache_creation_input_tokens,
+      cache_read_input_tokens: (draftResponse.usage as { cache_read_input_tokens?: number }).cache_read_input_tokens,
+    });
     totalCostUsd += draftCost;
 
     await costLedgerRepo.insert({

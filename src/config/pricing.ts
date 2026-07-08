@@ -32,16 +32,40 @@ export function getModelForTier(tier: Tier): { primary: string; fallback: string
   }
 }
 
+export interface UsageWithCache {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens?: number | undefined;
+  cache_read_input_tokens?: number | undefined;
+}
+
 export function estimateCostUsd(
   modelId: string,
-  inputTokens: number,
-  outputTokens: number
+  inputTokensOrUsage: number | UsageWithCache,
+  outputTokens?: number
 ): number {
   const pricing = PRICING[modelId];
   if (!pricing) {
     throw new Error(`unknown model id for pricing: ${modelId}`);
   }
-  const inputCost = (inputTokens / 1_000_000) * pricing.inputPerMUsd;
-  const outputCost = (outputTokens / 1_000_000) * pricing.outputPerMUsd;
+
+  // Handle object-form usage (with cache fields)
+  if (typeof inputTokensOrUsage === 'object') {
+    const usage = inputTokensOrUsage;
+    const cacheCreation = usage.cache_creation_input_tokens ?? 0;
+    const cacheRead = usage.cache_read_input_tokens ?? 0;
+    const regularInput = usage.input_tokens - cacheCreation - cacheRead;
+
+    const regularInputCost = (regularInput / 1_000_000) * pricing.inputPerMUsd;
+    const cacheCreationCost = (cacheCreation / 1_000_000) * pricing.inputPerMUsd * 1.25;
+    const cacheReadCost = (cacheRead / 1_000_000) * pricing.inputPerMUsd * 0.1;
+    const outputCost = (usage.output_tokens / 1_000_000) * pricing.outputPerMUsd;
+
+    return regularInputCost + cacheCreationCost + cacheReadCost + outputCost;
+  }
+
+  // Handle legacy two-argument form (backward compatible)
+  const inputCost = (inputTokensOrUsage / 1_000_000) * pricing.inputPerMUsd;
+  const outputCost = ((outputTokens ?? 0) / 1_000_000) * pricing.outputPerMUsd;
   return inputCost + outputCost;
 }
