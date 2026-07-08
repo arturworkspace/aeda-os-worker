@@ -286,7 +286,13 @@ CONTACT: ${researchData.contactName || 'Not found'}
   const scoringRequest = {
     model: 'claude-haiku-4-5-20251001' as const,
     max_tokens: 1024,
-    system: SCORING_SYSTEM_PROMPT,
+    system: [
+      {
+        type: 'text' as const,
+        text: SCORING_SYSTEM_PROMPT,
+        cache_control: { type: 'ephemeral' as const },
+      },
+    ],
     tools: [SCORING_TOOL],
     tool_choice: { type: 'tool' as const, name: 'score_investor_fit' },
     messages: [{ role: 'user' as const, content: `Score this investor's fit for aeda:\n\n${researchSummary}` }],
@@ -455,7 +461,13 @@ async function runResearchAsync(
     const researchResponse = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 4096,
-      system: RESEARCH_SYSTEM_PROMPT,
+      system: [
+        {
+          type: 'text',
+          text: RESEARCH_SYSTEM_PROMPT,
+          cache_control: { type: 'ephemeral' },
+        },
+      ],
       tools: [{ type: 'web_search_20250305', name: 'web_search' }],
       messages: [{ role: 'user', content: researchQuery }],
     });
@@ -932,7 +944,13 @@ CONTACT:
     const draftResponse = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 1024,
-      system: FIRST_EMAIL_DRAFTING_SYSTEM,
+      system: [
+        {
+          type: 'text',
+          text: FIRST_EMAIL_DRAFTING_SYSTEM,
+          cache_control: { type: 'ephemeral' },
+        },
+      ],
       messages: [{
         role: 'user',
         content: `Draft a first-outreach email to this investor:\n\n${researchContext}`,
