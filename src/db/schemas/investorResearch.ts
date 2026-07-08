@@ -50,6 +50,7 @@ export interface IInvestorResearch {
   status: 'pending' | 'running' | 'completed' | 'failed';
   error: string | null;
   relevanceScore: IRelevanceScore | null;
+  researchModel?: 'sonnet' | 'haiku' | undefined;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -118,6 +119,7 @@ const investorResearchSchema = new Schema<IInvestorResearch>(
     },
     error: { type: String, default: null },
     relevanceScore: { type: relevanceScoreSchema, default: null },
+    researchModel: { type: String, enum: ['sonnet', 'haiku'], default: 'sonnet' },
   },
   {
     collection: 'os_investor_research',
