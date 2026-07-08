@@ -760,7 +760,12 @@ Describe aeda as "cross-border payment infrastructure built on stablecoin rails 
 EMAIL STRUCTURE — six beats, in this order:
 1. Investor relevance (why this investor specifically — portfolio, thesis, or recent activity)
 2. What aeda is (the core description, one sentence)
-3. Why now (one clause on market timing/urgency — brief, not an extended paragraph)
+3. Why now (one clause, picking the ONE or TWO most relevant of these four momentum drivers based on the specific investor's thesis/focus — do not list all four, choose the best fit):
+   - Regulation: regulatory clarity emerging in EU (MiCA) and US (GENIUS Act)
+   - Fragmentation: geopolitical disruption (wars, sanctions) breaking traditional cross-border transfer rails
+   - Market: fast-growing remittance market still served by uncompetitive, expensive legacy rails
+   - 24/7: real-time settlement via stablecoins, anytime, anywhere — vs. legacy multi-day settlement windows
+   Pick whichever driver(s) best match the investor's stated thesis or portfolio pattern from the research. Keep this to one clause or short sentence — do not expand into a paragraph.
 4. Market (the $81B corridor context)
 5. Team/traction (the team-credibility clause, since traction metrics are placeholder-gated)
 6. CTA (the closing ask)
