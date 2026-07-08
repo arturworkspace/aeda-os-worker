@@ -13,7 +13,7 @@ import { writeAuditEvent } from '../core/auditLog.js';
 import { getPersona } from '../agents/personas.js';
 import { logger } from '../logger.js';
 
-const MONTHLY_EMAIL_BUDGET_USD = 5;
+const EMAIL_DAILY_BUDGET_USD = Number(process.env['EMAIL_DAILY_BUDGET_USD']) || 5;
 
 export const JOB_NAME = 'process-inbound-email';
 
@@ -249,13 +249,13 @@ export function defineJob(agenda: Agenda): void {
         ? `\n\nCRM CONTEXT: This sender matches investor "${crmMatch.investor_name}" (matched on ${crmMatch.matched_on}).`
         : '\n\nCRM CONTEXT: No CRM match found for this sender.';
 
-      const monthToDateEmailCost = await costLedgerRepo.getMonthToDateTotal();
-      if (monthToDateEmailCost >= MONTHLY_EMAIL_BUDGET_USD) {
+      const dayToDateEmailCost = await costLedgerRepo.getDayToDateTotal();
+      if (dayToDateEmailCost >= EMAIL_DAILY_BUDGET_USD) {
         logger.warn(
-          { monthToDateEmailCost, budget: MONTHLY_EMAIL_BUDGET_USD },
-          'monthly email budget exceeded ($5 cap)'
+          { dayToDateEmailCost, budget: EMAIL_DAILY_BUDGET_USD },
+          'daily email budget exceeded'
         );
-        console.log('monthly email budget exceeded:', monthToDateEmailCost, '>=', MONTHLY_EMAIL_BUDGET_USD);
+        console.log('daily email budget exceeded:', dayToDateEmailCost, '>=', EMAIL_DAILY_BUDGET_USD);
 
         await writeAuditEvent({
           actor: 'system',
@@ -264,8 +264,8 @@ export function defineJob(agenda: Agenda): void {
           payload: {
             inbox_item_id: inboxItemId,
             skipped: true,
-            reason: 'monthly_budget_exceeded',
-            cost_usd: monthToDateEmailCost,
+            reason: 'daily_budget_exceeded',
+            cost_usd: dayToDateEmailCost,
           },
         });
 
@@ -274,7 +274,7 @@ export function defineJob(agenda: Agenda): void {
           drafted_by_agent: 'system',
           to: inboxItem.sender_email,
           subject: `Re: ${inboxItem.subject}`,
-          body: '[Auto-reply paused — monthly processing budget reached. Artur will respond manually.]',
+          body: '[Auto-reply paused — daily processing budget reached. Artur will respond manually.]',
           thread_context: 'budget exceeded',
         });
 
@@ -283,7 +283,7 @@ export function defineJob(agenda: Agenda): void {
             const gmailResult = await createDraft(
               inboxItem.sender_email,
               `Re: ${inboxItem.subject}`,
-              '[Auto-reply paused — monthly processing budget reached. Artur will respond manually.]',
+              '[Auto-reply paused — daily processing budget reached. Artur will respond manually.]',
               inboxItem.message_id
             );
             await emailDraftRepo.updateGmailInfo(

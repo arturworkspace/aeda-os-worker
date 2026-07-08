@@ -12,7 +12,7 @@ import { logger } from '../logger.js';
 import { getPersona } from '../agents/personas.js';
 import { isJuliaGmailConfigured, juliaCreateDraft } from '../services/juliaGmail.js';
 
-const MONTHLY_RESEARCH_BUDGET_USD = 5;
+const RESEARCH_DAILY_BUDGET_USD = Number(process.env['RESEARCH_DAILY_BUDGET_USD']) || 5;
 const JOB_NAME = 'investor-research';
 
 const anthropic = new Anthropic();
@@ -634,10 +634,10 @@ async function processBulkResearch(
     const investorId = inv._id.toHexString();
 
     // Check budget before each investor
-    const monthToDateCost = await costLedgerRepo.getMonthToDateTotal();
-    if (monthToDateCost >= MONTHLY_RESEARCH_BUDGET_USD) {
+    const dayToDateCost = await costLedgerRepo.getDayToDateTotal();
+    if (dayToDateCost >= RESEARCH_DAILY_BUDGET_USD) {
       budgetBlocked++;
-      logger.warn({ investorId, monthToDateCost, budget: MONTHLY_RESEARCH_BUDGET_USD }, 'bulk: budget exceeded, skipping investor');
+      logger.warn({ investorId, dayToDateCost, budget: RESEARCH_DAILY_BUDGET_USD }, 'bulk: budget exceeded, skipping investor');
       return 'budget';
     }
 
@@ -713,7 +713,7 @@ async function processBulkResearch(
   }
 
   // Get final cost for this batch
-  const endCost = await costLedgerRepo.getMonthToDateTotal();
+  const endCost = await costLedgerRepo.getDayToDateTotal();
   totalCostUsd = endCost;
 
   await writeAuditEvent({
@@ -1291,10 +1291,10 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
       const investorFirm = investor.firm || '';
 
       // Step 3: Check budget
-      const monthToDateCost = await costLedgerRepo.getMonthToDateTotal();
-      if (monthToDateCost >= MONTHLY_RESEARCH_BUDGET_USD) {
-        logger.warn({ monthToDateCost, budget: MONTHLY_RESEARCH_BUDGET_USD }, 'monthly research budget exceeded');
-        await upsertFailed(investorObjId, 'Monthly budget cap reached');
+      const dayToDateCost = await costLedgerRepo.getDayToDateTotal();
+      if (dayToDateCost >= RESEARCH_DAILY_BUDGET_USD) {
+        logger.warn({ dayToDateCost, budget: RESEARCH_DAILY_BUDGET_USD }, 'daily research budget exceeded');
+        await upsertFailed(investorObjId, 'Daily budget cap reached');
         await writeAuditEvent({
           actor: 'system',
           actorType: 'system',
@@ -1302,11 +1302,11 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
           payload: {
             jobName: JOB_NAME,
             investorId,
-            monthToDateCost,
-            budget: MONTHLY_RESEARCH_BUDGET_USD,
+            dayToDateCost,
+            budget: RESEARCH_DAILY_BUDGET_USD,
           },
         });
-        res.json({ status: 'failed', investorId, error: 'Monthly budget cap reached' });
+        res.json({ status: 'failed', investorId, error: 'Daily budget cap reached' });
         return;
       }
 
@@ -1385,10 +1385,10 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
       }
 
       // Step 4: Check budget
-      const monthToDateCost = await costLedgerRepo.getMonthToDateTotal();
-      if (monthToDateCost >= MONTHLY_RESEARCH_BUDGET_USD) {
-        logger.warn({ monthToDateCost, budget: MONTHLY_RESEARCH_BUDGET_USD }, 'monthly budget exceeded for draft-email');
-        res.json({ status: 'failed', investorId, error: 'Monthly budget cap reached' });
+      const dayToDateCost = await costLedgerRepo.getDayToDateTotal();
+      if (dayToDateCost >= RESEARCH_DAILY_BUDGET_USD) {
+        logger.warn({ dayToDateCost, budget: RESEARCH_DAILY_BUDGET_USD }, 'daily budget exceeded for draft-email');
+        res.json({ status: 'failed', investorId, error: 'Daily budget cap reached' });
         return;
       }
 
