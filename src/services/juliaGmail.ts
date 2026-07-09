@@ -76,11 +76,12 @@ export interface JuliaCreateDraftResult {
   draftId: string;
   messageId: string | null;
   threadId: string | null;
+  rfc822MessageId: string | null;
 }
 
 export interface JuliaCreateDraftOptions {
-  threadId?: string;
-  inReplyToMessageId?: string;
+  threadId?: string | undefined;
+  inReplyToMessageId?: string | undefined;
 }
 
 export async function juliaCreateDraft(
@@ -117,9 +118,30 @@ export async function juliaCreateDraft(
     throw new Error('julia gmail draft creation returned no draft id');
   }
 
-  logger.info({ draftId, messageId, threadId, to }, 'julia gmail draft created');
+  // Fetch the RFC 2822 Message-ID header (best-effort, don't fail if this errors)
+  let rfc822MessageId: string | null = null;
+  if (messageId) {
+    try {
+      const msgResponse = await juliaGmailClient.users.messages.get({
+        userId: 'me',
+        id: messageId,
+        format: 'metadata',
+        metadataHeaders: ['Message-Id'],
+      });
+      const headers = msgResponse.data.payload?.headers ?? [];
+      const messageIdHeader = headers.find(
+        (h) => h.name?.toLowerCase() === 'message-id'
+      );
+      rfc822MessageId = messageIdHeader?.value ?? null;
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.warn({ error: errMsg, messageId }, 'failed to fetch RFC 2822 Message-ID header, continuing without it');
+    }
+  }
 
-  return { draftId, messageId, threadId };
+  logger.info({ draftId, messageId, threadId, rfc822MessageId, to }, 'julia gmail draft created');
+
+  return { draftId, messageId, threadId, rfc822MessageId };
 }
 
 export function isJuliaGmailConfigured(): boolean {

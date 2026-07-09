@@ -76,7 +76,8 @@ export const emailDraftRepo = {
     id: Types.ObjectId | string,
     gmailDraftId: string,
     gmailMessageId: string | null,
-    gmailThreadId?: string | null
+    gmailThreadId?: string | null,
+    gmailRfc822MessageId?: string | null
   ): Promise<IEmailDraftDocument | null> {
     return EmailDraft.findByIdAndUpdate(
       id,
@@ -84,6 +85,7 @@ export const emailDraftRepo = {
         gmail_draft_id: gmailDraftId,
         gmail_message_id: gmailMessageId,
         gmail_thread_id: gmailThreadId ?? null,
+        gmail_rfc822_message_id: gmailRfc822MessageId ?? null,
         status: 'pushed_to_gmail',
         pushed_at: new Date(),
       },

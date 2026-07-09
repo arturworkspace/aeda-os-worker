@@ -1098,12 +1098,13 @@ CONTACT:
           parsedDraft.subjectOptions[0] || 'Introduction from aeda',
           parsedDraft.body
         );
-        // Update the email draft with Gmail IDs (including threadId for follow-up linking)
+        // Update the email draft with Gmail IDs (including threadId and rfc822MessageId for follow-up linking)
         await emailDraftRepo.updateGmailInfo(
           emailDraft._id as Types.ObjectId,
           gmailResult.draftId,
           gmailResult.messageId,
-          gmailResult.threadId
+          gmailResult.threadId,
+          gmailResult.rfc822MessageId
         );
         logger.info(
           { investorId, gmailDraftId: gmailResult.draftId },

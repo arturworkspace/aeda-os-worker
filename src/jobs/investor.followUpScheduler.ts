@@ -229,22 +229,24 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
         // Push to Julia's Gmail drafts if configured (best-effort, non-blocking)
         if (isJuliaGmailConfigured() && investor.email) {
           try {
-            // Use first_email's threadId for Gmail threading (already fetched above)
+            // Use first_email's threadId and rfc822MessageId for proper Gmail threading
             const threadId = firstEmailDraft?.gmail_thread_id ?? undefined;
+            const inReplyToMessageId = firstEmailDraft?.gmail_rfc822_message_id ?? undefined;
             const gmailResult = await juliaCreateDraft(
               investor.email,
               draftContent.subject,
               draftContent.body,
-              threadId ? { threadId } : undefined
+              threadId || inReplyToMessageId ? { threadId, inReplyToMessageId } : undefined
             );
             await emailDraftRepo.updateGmailInfo(
               emailDraft._id as Types.ObjectId,
               gmailResult.draftId,
               gmailResult.messageId,
-              gmailResult.threadId
+              gmailResult.threadId,
+              gmailResult.rfc822MessageId
             );
             logger.info(
-              { investorId: investor._id, gmailDraftId: gmailResult.draftId, threadId: gmailResult.threadId },
+              { investorId: investor._id, gmailDraftId: gmailResult.draftId, threadId: gmailResult.threadId, rfc822MessageId: gmailResult.rfc822MessageId },
               'follow-up 1 draft pushed to julia gmail'
             );
           } catch (gmailError) {
@@ -397,22 +399,24 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
         // Push to Julia's Gmail drafts if configured (best-effort, non-blocking)
         if (isJuliaGmailConfigured() && investor.email) {
           try {
-            // Use followup1's threadId to continue the thread chain (fall back to first_email's threadId)
+            // Use followup1's threadId and rfc822MessageId to continue the thread chain (fall back to first_email's)
             const threadId = followup1Draft?.gmail_thread_id ?? firstEmailDraft?.gmail_thread_id ?? undefined;
+            const inReplyToMessageId = followup1Draft?.gmail_rfc822_message_id ?? firstEmailDraft?.gmail_rfc822_message_id ?? undefined;
             const gmailResult = await juliaCreateDraft(
               investor.email,
               draftContent.subject,
               draftContent.body,
-              threadId ? { threadId } : undefined
+              threadId || inReplyToMessageId ? { threadId, inReplyToMessageId } : undefined
             );
             await emailDraftRepo.updateGmailInfo(
               emailDraft._id as Types.ObjectId,
               gmailResult.draftId,
               gmailResult.messageId,
-              gmailResult.threadId
+              gmailResult.threadId,
+              gmailResult.rfc822MessageId
             );
             logger.info(
-              { investorId: investor._id, gmailDraftId: gmailResult.draftId, threadId: gmailResult.threadId },
+              { investorId: investor._id, gmailDraftId: gmailResult.draftId, threadId: gmailResult.threadId, rfc822MessageId: gmailResult.rfc822MessageId },
               'follow-up 2 draft pushed to julia gmail'
             );
           } catch (gmailError) {
