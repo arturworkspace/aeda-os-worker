@@ -7,7 +7,7 @@ import { businessDaysBetween } from '../lib/dates.js';
 import { routedCall, getTextContent } from '../core/modelRouter.js';
 import { writeAuditEvent } from '../core/auditLog.js';
 import { getPersona } from '../agents/personas.js';
-import { createDraft, isGmailConfigured } from '../services/gmail.js';
+import { isJuliaGmailConfigured, juliaCreateDraft } from '../services/juliaGmail.js';
 import { logger } from '../logger.js';
 
 export const JOB_NAME = 'investor.followUpScheduler';
@@ -225,23 +225,30 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
         });
         await inboxItem.save();
 
-        // Push to Gmail drafts if configured
-        if (isGmailConfigured() && investor.email) {
+        // Push to Julia's Gmail drafts if configured (best-effort, non-blocking)
+        if (isJuliaGmailConfigured() && investor.email) {
           try {
-            const gmailResult = await createDraft(
+            // Use first_email's threadId for Gmail threading (already fetched above)
+            const threadId = firstEmailDraft?.gmail_thread_id ?? undefined;
+            const gmailResult = await juliaCreateDraft(
               investor.email,
               draftContent.subject,
               draftContent.body,
-              investor.emailThreadId || undefined
+              threadId ? { threadId } : undefined
             );
             await emailDraftRepo.updateGmailInfo(
               emailDraft._id as Types.ObjectId,
               gmailResult.draftId,
-              gmailResult.messageId
+              gmailResult.messageId,
+              gmailResult.threadId
+            );
+            logger.info(
+              { investorId: investor._id, gmailDraftId: gmailResult.draftId, threadId: gmailResult.threadId },
+              'follow-up 1 draft pushed to julia gmail'
             );
           } catch (gmailError) {
             const errMsg = gmailError instanceof Error ? gmailError.message : String(gmailError);
-            logger.warn({ error: errMsg, investorId: investor._id }, 'gmail draft creation failed for follow-up 1');
+            logger.warn({ error: errMsg, investorId: investor._id }, 'julia gmail draft creation failed for follow-up 1');
           }
         }
 
@@ -298,6 +305,12 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
         const firstEmailContext = firstEmailDraft
           ? `\n\nOriginal email sent:\nSubject: ${firstEmailDraft.subject}\nBody: ${firstEmailDraft.body}`
           : '';
+
+        // Fetch followup1 draft for Gmail threading (continue the thread chain)
+        const followup1Draft = await emailDraftRepo.findByInvestorAndStage(
+          investor._id as Types.ObjectId,
+          'followup1'
+        );
 
         // Generate draft via Julia
         const result = await routedCall({
@@ -379,23 +392,30 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
         });
         await inboxItem2.save();
 
-        // Push to Gmail drafts if configured
-        if (isGmailConfigured() && investor.email) {
+        // Push to Julia's Gmail drafts if configured (best-effort, non-blocking)
+        if (isJuliaGmailConfigured() && investor.email) {
           try {
-            const gmailResult = await createDraft(
+            // Use followup1's threadId to continue the thread chain (fall back to first_email's threadId)
+            const threadId = followup1Draft?.gmail_thread_id ?? firstEmailDraft?.gmail_thread_id ?? undefined;
+            const gmailResult = await juliaCreateDraft(
               investor.email,
               draftContent.subject,
               draftContent.body,
-              investor.emailThreadId || undefined
+              threadId ? { threadId } : undefined
             );
             await emailDraftRepo.updateGmailInfo(
               emailDraft._id as Types.ObjectId,
               gmailResult.draftId,
-              gmailResult.messageId
+              gmailResult.messageId,
+              gmailResult.threadId
+            );
+            logger.info(
+              { investorId: investor._id, gmailDraftId: gmailResult.draftId, threadId: gmailResult.threadId },
+              'follow-up 2 draft pushed to julia gmail'
             );
           } catch (gmailError) {
             const errMsg = gmailError instanceof Error ? gmailError.message : String(gmailError);
-            logger.warn({ error: errMsg, investorId: investor._id }, 'gmail draft creation failed for follow-up 2');
+            logger.warn({ error: errMsg, investorId: investor._id }, 'julia gmail draft creation failed for follow-up 2');
           }
         }
 

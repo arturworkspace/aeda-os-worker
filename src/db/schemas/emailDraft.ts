@@ -12,6 +12,7 @@ export interface IEmailDraft {
   thread_context: string;
   gmail_draft_id: string | null;
   gmail_message_id: string | null;
+  gmail_thread_id: string | null;
   pending_send_label_applied: boolean;
   status: DraftStatus;
   created_at: Date;
@@ -39,6 +40,7 @@ const emailDraftSchema = new Schema<IEmailDraft>(
     thread_context: { type: String, default: '' },
     gmail_draft_id: { type: String, default: null },
     gmail_message_id: { type: String, default: null },
+    gmail_thread_id: { type: String, default: null },
     pending_send_label_applied: { type: Boolean, default: false },
     status: { type: String, enum: DRAFT_STATUSES, default: 'pending' },
     created_at: { type: Date, default: () => new Date() },

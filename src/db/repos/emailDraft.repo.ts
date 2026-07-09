@@ -75,13 +75,15 @@ export const emailDraftRepo = {
   async updateGmailInfo(
     id: Types.ObjectId | string,
     gmailDraftId: string,
-    gmailMessageId: string | null
+    gmailMessageId: string | null,
+    gmailThreadId?: string | null
   ): Promise<IEmailDraftDocument | null> {
     return EmailDraft.findByIdAndUpdate(
       id,
       {
         gmail_draft_id: gmailDraftId,
         gmail_message_id: gmailMessageId,
+        gmail_thread_id: gmailThreadId ?? null,
         status: 'pushed_to_gmail',
         pushed_at: new Date(),
       },

@@ -43,13 +43,23 @@ function encodeRfc2047(text: string): string {
   return `=?UTF-8?B?${Buffer.from(text, 'utf-8').toString('base64')}?=`;
 }
 
-function createRawEmail(to: string, subject: string, body: string): string {
+function createRawEmail(
+  to: string,
+  subject: string,
+  body: string,
+  inReplyToMessageId?: string
+): string {
   const headers = [
     `To: ${to}`,
     `Subject: ${encodeRfc2047(subject)}`,
     `MIME-Version: 1.0`,
     `Content-Type: text/plain; charset="UTF-8"`,
   ];
+
+  if (inReplyToMessageId) {
+    headers.push(`In-Reply-To: ${inReplyToMessageId}`);
+    headers.push(`References: ${inReplyToMessageId}`);
+  }
 
   const rawEmail = headers.join('\r\n') + '\r\n\r\n' + body;
 
@@ -63,12 +73,19 @@ function createRawEmail(to: string, subject: string, body: string): string {
 export interface JuliaCreateDraftResult {
   draftId: string;
   messageId: string | null;
+  threadId: string | null;
+}
+
+export interface JuliaCreateDraftOptions {
+  threadId?: string;
+  inReplyToMessageId?: string;
 }
 
 export async function juliaCreateDraft(
   to: string,
   subject: string,
-  body: string
+  body: string,
+  options?: JuliaCreateDraftOptions
 ): Promise<JuliaCreateDraftResult> {
   if (!juliaGmailClient || !juliaOauth2Client) {
     throw new Error('julia gmail client not initialized');
@@ -76,25 +93,31 @@ export async function juliaCreateDraft(
 
   await refreshJuliaAccessToken();
 
-  const raw = createRawEmail(to, subject, body);
+  const raw = createRawEmail(to, subject, body, options?.inReplyToMessageId);
+
+  const messageResource: { raw: string; threadId?: string } = { raw };
+  if (options?.threadId) {
+    messageResource.threadId = options.threadId;
+  }
 
   const response = await juliaGmailClient.users.drafts.create({
     userId: 'me',
     requestBody: {
-      message: { raw },
+      message: messageResource,
     },
   });
 
   const draftId = response.data.id;
   const messageId = response.data.message?.id ?? null;
+  const threadId = response.data.message?.threadId ?? null;
 
   if (!draftId) {
     throw new Error('julia gmail draft creation returned no draft id');
   }
 
-  logger.info({ draftId, messageId, to }, 'julia gmail draft created');
+  logger.info({ draftId, messageId, threadId, to }, 'julia gmail draft created');
 
-  return { draftId, messageId };
+  return { draftId, messageId, threadId };
 }
 
 export function isJuliaGmailConfigured(): boolean {
