@@ -15,6 +15,20 @@ export const JOB_NAME = 'investor.followUpScheduler';
 const FOLLOW_UP_1_BUSINESS_DAYS = 5;
 const FOLLOW_UP_2_BUSINESS_DAYS = 7;
 
+const FOLLOW_UP_POSITIONING_GUARDRAILS = `
+CRITICAL — GEOGRAPHIC POSITIONING:
+Never name Armenia specifically in the email. aeda's positioning is the broader EU/US <> Eastern Europe & Central Asia (EECA) corridor, not a single country. Do not say "EU-Armenia corridor," "EUR-AMD," or reference Armenia by name.
+
+CRITICAL — COMPANY DESCRIPTION (if needed):
+Describe aeda only as "cross-border payment infrastructure built on stablecoin rails and blockchain for individuals and businesses" — never name specific stablecoins (EURC, USDC, etc.).
+
+CRITICAL — MARKET SIZE:
+If a market-size reference is used, only "$81B annual corridor" or "$81B market" — no other figure.
+
+CRITICAL — FINANCIAL FIGURES:
+For any specific financial metric (burn rate, cash position, runway months, revenue, funding target amount, traction numbers), you MUST use the exact placeholder text "[PENDING FINANCIAL UPDATE]" instead of inventing or inferring a number.
+`.trim();
+
 // Test mode: env vars to use minute-based thresholds instead of business days
 const FOLLOWUP_1_TEST_MINUTES = process.env['FOLLOWUP_1_TEST_MINUTES']
   ? parseInt(process.env['FOLLOWUP_1_TEST_MINUTES'], 10)
@@ -122,11 +136,20 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
           continue;
         }
 
+        // Fetch the original first_email for context
+        const firstEmailDraft = await emailDraftRepo.findByInvestorAndDraftType(
+          investor._id as Types.ObjectId,
+          'first_email'
+        );
+        const firstEmailContext = firstEmailDraft
+          ? `\n\nOriginal email sent:\nSubject: ${firstEmailDraft.subject}\nBody: ${firstEmailDraft.body}`
+          : '';
+
         // Generate draft via Julia
         const result = await routedCall({
           tier: 'production',
           agentOrJob: 'julia',
-          system: julia.systemPrompt + '\n\nYou are drafting a follow-up email. Return JSON with "subject" and "body" fields.',
+          system: julia.systemPrompt + '\n\nYou are drafting a follow-up email. Return JSON with "subject" and "body" fields.\n\n' + FOLLOW_UP_POSITIONING_GUARDRAILS,
           messages: [
             {
               role: 'user',
@@ -135,12 +158,12 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
 Investor: ${investor.name}
 Firm: ${investor.firm || 'Unknown'}
 Type: ${investor.type}
-Notes: ${investor.notes || 'None'}
+Notes: ${investor.notes || 'None'}${firstEmailContext}
 
 Rules:
 - Write as Artur (CEO), first person
 - Keep it brief (under 100 words)
-- Reference the initial email
+- Reference the initial email naturally (you have it above for context)
 - Add one small new data point if possible
 - Professional but warm
 - No signature needed
@@ -267,11 +290,20 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
           continue;
         }
 
+        // Fetch the original first_email for context
+        const firstEmailDraft = await emailDraftRepo.findByInvestorAndDraftType(
+          investor._id as Types.ObjectId,
+          'first_email'
+        );
+        const firstEmailContext = firstEmailDraft
+          ? `\n\nOriginal email sent:\nSubject: ${firstEmailDraft.subject}\nBody: ${firstEmailDraft.body}`
+          : '';
+
         // Generate draft via Julia
         const result = await routedCall({
           tier: 'production',
           agentOrJob: 'julia',
-          system: julia.systemPrompt + '\n\nYou are drafting a follow-up email. Return JSON with "subject" and "body" fields.',
+          system: julia.systemPrompt + '\n\nYou are drafting a follow-up email. Return JSON with "subject" and "body" fields.\n\n' + FOLLOW_UP_POSITIONING_GUARDRAILS,
           messages: [
             {
               role: 'user',
@@ -280,13 +312,13 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
 Investor: ${investor.name}
 Firm: ${investor.firm || 'Unknown'}
 Type: ${investor.type}
-Notes: ${investor.notes || 'None'}
+Notes: ${investor.notes || 'None'}${firstEmailContext}
 
 Rules:
 - Write as Artur (CEO), first person
 - Keep it very brief (under 75 words)
 - This is a final check-in, respect their time
-- Offer to close the loop if not a fit
+- Offer to close the loop if not a fit (this is intentionally different from the first-email CTA — it's a graceful exit)
 - Professional and gracious
 - No signature needed
 
