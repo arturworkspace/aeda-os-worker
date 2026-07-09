@@ -811,6 +811,9 @@ For any specific financial metric (burn rate, cash position, runway months, reve
 CRITICAL — GEOGRAPHIC POSITIONING:
 Never name Armenia specifically in the email. aeda's positioning is the broader EU/US <> Eastern Europe & Central Asia (EECA) corridor, not a single country. Do not say "EU-Armenia corridor," "EUR-AMD," or reference Armenia by name.
 
+CRITICAL — GREETINGS:
+If the contact's first name is not known or not provided, use a generic greeting like "Hi," or "Hi there," — NEVER output a bracketed placeholder token like "[First Name]" or similar in the final email text.
+
 Return your response as JSON with exactly these fields:
 {
   "subjectOptions": ["Subject line option 1", "Subject line option 2", "Subject line option 3"],

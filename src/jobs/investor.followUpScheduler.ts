@@ -167,6 +167,7 @@ Rules:
 - Add one small new data point if possible
 - Professional but warm
 - No signature needed
+- If the contact's first name is not known or not provided, use a generic greeting like "Hi," or "Hi there," — NEVER output a bracketed placeholder token like "[First Name]" or similar in the final email text
 
 Return JSON: {"subject": "Re: ...", "body": "..."}`,
             },
@@ -334,6 +335,7 @@ Rules:
 - Offer to close the loop if not a fit (this is intentionally different from the first-email CTA — it's a graceful exit)
 - Professional and gracious
 - No signature needed
+- If the contact's first name is not known or not provided, use a generic greeting like "Hi," or "Hi there," — NEVER output a bracketed placeholder token like "[First Name]" or similar in the final email text
 
 Return JSON: {"subject": "Re: ...", "body": "..."}`,
             },
