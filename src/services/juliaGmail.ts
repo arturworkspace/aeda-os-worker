@@ -50,6 +50,8 @@ function createRawEmail(
   inReplyToMessageId?: string
 ): string {
   const headers = [
+    `Date: ${new Date().toUTCString()}`,
+    `From: julia@aedawallet.com`,
     `To: ${to}`,
     `Subject: ${encodeRfc2047(subject)}`,
     `MIME-Version: 1.0`,
