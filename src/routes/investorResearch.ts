@@ -1642,6 +1642,104 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
     }
   });
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEST-PLACEHOLDER-GATE: Test endpoint to verify placeholder blocking works
+  // This creates real InboxItems that you can verify in the UI
+  // ═══════════════════════════════════════════════════════════════════════════
+  router.post('/test-placeholder-gate', async (req: Request, res: Response) => {
+    const provided = req.headers['x-trigger-secret'];
+    const expected = process.env['TRIGGER_SECRET'];
+    if (!expected || provided !== expected) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { testCase } = req.body as { testCase?: string };
+    const testInvestorName = 'Placeholder Gate Test';
+    const testInvestorId = new Types.ObjectId();
+
+    const testCases: Record<string, { subject: string; body: string }> = {
+      'pending_financial': {
+        subject: 'Re: Introduction from aeda',
+        body: 'Hi there, We are raising [PENDING FINANCIAL UPDATE] for our Series A round.',
+      },
+      'first_name': {
+        subject: 'Re: Following up',
+        body: 'Hi [First Name], I wanted to follow up on my previous email about aeda.',
+      },
+      'FIRST_NAME': {
+        subject: 'Re: aeda Partnership',
+        body: 'Hello [FIRST NAME], Thank you for your time last week.',
+      },
+      'clean': {
+        subject: 'Re: Introduction from aeda',
+        body: 'Hi there, I wanted to follow up. We are building cross-border payment infrastructure on stablecoin rails.',
+      },
+    };
+
+    const selectedCase = testCases[testCase || 'pending_financial'];
+    if (!selectedCase) {
+      res.status(400).json({ error: `Unknown testCase. Valid: ${Object.keys(testCases).join(', ')}` });
+      return;
+    }
+
+    console.log(`[test-placeholder-gate] Running test case: ${testCase || 'pending_financial'}`);
+
+    const placeholderCheck = validateNoForbiddenPlaceholders(selectedCase.subject, selectedCase.body, testInvestorName);
+
+    if (!placeholderCheck.valid) {
+      // Create the error inbox item (this is what the real code does)
+      const errorInboxItem = new InboxItem({
+        recipient: 'julia@aeda.internal',
+        sender_email: 'system@aeda.internal',
+        sender_name: 'aeda System',
+        subject: `⚠️ TEST: Draft BLOCKED for ${testInvestorName}: ${placeholderCheck.foundPlaceholder}`,
+        body_raw: '',
+        body_sanitized: '',
+        body_hardened: '',
+        body_text: `TEST: The draft was blocked because it contains: ${placeholderCheck.foundPlaceholder}\n\nOriginal body: ${selectedCase.body}`,
+        body_html: '',
+        attachments: [],
+        agent_commentary: `TEST: Draft blocked due to placeholder: ${placeholderCheck.foundPlaceholder}`,
+        received_at: new Date(),
+        message_id: `test-placeholder-block-${testCase}-${Date.now()}`,
+        in_reply_to: null,
+        crm_match: {
+          matched: false,
+          investor_id: testInvestorId.toHexString(),
+          investor_name: testInvestorName,
+          matched_on: null,
+        },
+        routing: {
+          artur_classification: 'system_alert',
+          routed_to_agent: 'julia',
+          artur_brief: `TEST: Draft blocked for ${testInvestorName}`,
+          lilit_task_id: null,
+        },
+        processing_status: 'blocked',
+        processing_error: `Unfilled placeholder: ${placeholderCheck.foundPlaceholder}`,
+        cost_usd: 0,
+      });
+      await errorInboxItem.save();
+
+      res.json({
+        status: 'blocked',
+        testCase: testCase || 'pending_financial',
+        placeholder: placeholderCheck.foundPlaceholder,
+        inboxItemId: (errorInboxItem._id as Types.ObjectId).toHexString(),
+        message: 'InboxItem created - check Julia inbox in UI',
+      });
+      return;
+    }
+
+    // Clean case - would normally create draft, but for test we just confirm
+    res.json({
+      status: 'passed',
+      testCase: testCase || 'pending_financial',
+      message: 'Validation passed - draft would be created normally',
+    });
+  });
+
   return router;
 }
 
