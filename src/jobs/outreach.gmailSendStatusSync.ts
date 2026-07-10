@@ -2,6 +2,7 @@ import { Agenda, Job } from 'agenda';
 import { Types } from 'mongoose';
 import { emailDraftRepo } from '../db/repos/emailDraft.repo.js';
 import { investorRepo } from '../db/repos/investor.repo.js';
+import { Investor } from '../db/schemas/investor.js';
 import { isJuliaGmailConfigured, juliaDeleteDraft } from '../services/juliaGmail.js';
 import { InboxItem } from '../db/schemas/inboxItem.js';
 import { writeAuditEvent } from '../core/auditLog.js';
@@ -148,6 +149,18 @@ export async function runGmailSendStatusSync(): Promise<GmailSendStatusSyncResul
 
           await emailDraftRepo.markAsSent(draft._id, sentAt || new Date());
           updatedCount++;
+
+          // Also update investor's firstEmailSentAt if this is a first_email and not already set
+          if (draft.investorId && draft.draftType === 'first_email') {
+            const investor = await investorRepo.findById(draft.investorId);
+            if (investor && !investor.firstEmailSentAt) {
+              await Investor.findByIdAndUpdate(draft.investorId, {
+                firstEmailSentAt: sentAt || new Date(),
+                $push: { activityLog: { action: 'first_email_sent_auto', at: new Date() } },
+              });
+              logger.info({ investorId: draft.investorId }, 'set firstEmailSentAt on investor (auto-detected from gmail)');
+            }
+          }
         } else {
           logger.warn({ error: err.message, draftId: draft.gmail_draft_id }, 'error checking draft status');
         }
