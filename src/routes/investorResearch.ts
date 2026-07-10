@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import { Types } from 'mongoose';
+import { google } from 'googleapis';
 import { InvestorResearch, IInvestorResearchDocument } from '../db/schemas/investorResearch.js';
 import { Investor, IInvestorDocument } from '../db/schemas/investor.js';
 import { InboxItem } from '../db/schemas/inboxItem.js';
@@ -16,6 +17,28 @@ const RESEARCH_DAILY_BUDGET_USD = Number(process.env['RESEARCH_DAILY_BUDGET_USD'
 const JOB_NAME = 'investor-research';
 
 const anthropic = new Anthropic();
+
+// Forbidden placeholders that must be filled in before creating a draft
+// This validation runs BEFORE saving to DB, not just at Gmail push time
+const FORBIDDEN_PLACEHOLDERS = [
+  '[PENDING FINANCIAL UPDATE]',
+  '[First Name]',
+  '[FIRST NAME]',
+];
+
+interface PlaceholderValidationResult {
+  valid: boolean;
+  foundPlaceholder?: string;
+}
+
+function validateNoForbiddenPlaceholders(subject: string, body: string): PlaceholderValidationResult {
+  for (const placeholder of FORBIDDEN_PLACEHOLDERS) {
+    if (body.includes(placeholder) || subject.includes(placeholder)) {
+      return { valid: false, foundPlaceholder: placeholder };
+    }
+  }
+  return { valid: true };
+}
 
 const RESEARCH_SYSTEM_PROMPT = `You are a research assistant for aeda, a fintech startup.
 
@@ -1039,6 +1062,52 @@ CONTACT:
       return;
     }
 
+    // Validate no forbidden placeholders BEFORE saving draft
+    const draftSubject = parsedDraft.subjectOptions[0] || 'Introduction from aeda';
+    const placeholderCheck = validateNoForbiddenPlaceholders(draftSubject, parsedDraft.body);
+    if (!placeholderCheck.valid) {
+      logger.error({
+        investorId,
+        investorName: investor.name,
+        placeholder: placeholderCheck.foundPlaceholder,
+      }, 'BLOCKED: AI-generated draft contains unfilled placeholder - not saving to DB');
+
+      // Create an InboxItem to surface the error to Julia
+      const errorInboxItem = new InboxItem({
+        recipient: 'julia@aeda.internal',
+        sender_email: 'system@aeda.internal',
+        sender_name: 'aeda System',
+        subject: `⚠️ Draft BLOCKED for ${investor.name}: unfilled placeholder`,
+        body_raw: '',
+        body_sanitized: '',
+        body_hardened: '',
+        body_text: `The AI-generated draft for ${investor.name} was blocked because it contains an unfilled placeholder: ${placeholderCheck.foundPlaceholder}\n\nThis typically means the AI couldn't find certain information. Please manually draft this email or update the investor research with the missing info.`,
+        body_html: '',
+        attachments: [],
+        agent_commentary: `Draft blocked due to placeholder: ${placeholderCheck.foundPlaceholder}`,
+        received_at: new Date(),
+        message_id: `placeholder-block-${investorObjId.toHexString()}-${Date.now()}`,
+        in_reply_to: null,
+        crm_match: {
+          matched: true,
+          investor_id: investorObjId.toHexString(),
+          investor_name: investor.name,
+          matched_on: null,
+        },
+        routing: {
+          artur_classification: 'system_alert',
+          routed_to_agent: 'julia',
+          artur_brief: `Draft blocked for ${investor.name}`,
+          lilit_task_id: null,
+        },
+        processing_status: 'blocked',
+        processing_error: `Unfilled placeholder: ${placeholderCheck.foundPlaceholder}`,
+        cost_usd: 0,
+      });
+      await errorInboxItem.save();
+      return;
+    }
+
     // Save draft
     const emailDraft = await emailDraftRepo.create({
       drafted_by_agent: 'julia',
@@ -1447,6 +1516,127 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
       const errorMsg = err instanceof Error ? err.message : String(err);
       logger.error({ error: errorMsg, investorId }, 'draft-email endpoint failed');
       res.status(500).json({ status: 'failed', investorId, error: errorMsg });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // BACKFILL-THREAD-IDS: One-time backfill for drafts missing gmail_thread_id
+  // ═══════════════════════════════════════════════════════════════════════════
+  router.post('/backfill-thread-ids', async (req: Request, res: Response) => {
+    const provided = req.headers['x-trigger-secret'];
+    const expected = process.env['TRIGGER_SECRET'];
+    if (!expected || provided !== expected) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      // Find all drafts that have gmail_draft_id but missing gmail_thread_id
+      const draftsNeedingBackfill = await emailDraftRepo.find({
+        gmail_draft_id: { $exists: true, $ne: null },
+        $or: [
+          { gmail_thread_id: { $exists: false } },
+          { gmail_thread_id: null },
+        ],
+      });
+
+      logger.info({ count: draftsNeedingBackfill.length }, 'found drafts needing thread_id backfill');
+
+      if (draftsNeedingBackfill.length === 0) {
+        res.json({ status: 'complete', backfilled: 0, message: 'No drafts need backfill' });
+        return;
+      }
+
+      // Respond immediately, then process async
+      res.json({
+        status: 'processing',
+        count: draftsNeedingBackfill.length,
+        drafts: draftsNeedingBackfill.map(d => ({
+          id: d._id.toString(),
+          investorId: d.investorId?.toString() || 'none',
+          gmailDraftId: d.gmail_draft_id,
+        })),
+      });
+
+      // Initialize Gmail client for backfill
+      const clientId = process.env['JULIA_GMAIL_CLIENT_ID'];
+      const clientSecret = process.env['JULIA_GMAIL_CLIENT_SECRET'];
+      const refreshToken = process.env['JULIA_GMAIL_REFRESH_TOKEN'];
+
+      if (!clientId || !clientSecret || !refreshToken) {
+        logger.error('julia gmail credentials not configured for backfill');
+        return;
+      }
+
+      const oauth2Client = new google.auth.OAuth2(clientId, clientSecret);
+      oauth2Client.setCredentials({ refresh_token: refreshToken });
+      const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+      let backfilled = 0;
+      let errors = 0;
+
+      for (const draft of draftsNeedingBackfill) {
+        if (!draft.gmail_draft_id) continue;
+
+        try {
+          // Call Gmail API to get the draft and extract threadId
+          const draftResponse = await gmail.users.drafts.get({
+            userId: 'me',
+            id: draft.gmail_draft_id,
+          });
+
+          const threadId = draftResponse.data.message?.threadId;
+
+          if (threadId) {
+            // Update the draft record with the threadId
+            await emailDraftRepo.updateGmailInfo(
+              draft._id,
+              draft.gmail_draft_id,
+              draft.gmail_message_id || null,
+              threadId,
+              draft.gmail_rfc822_message_id || null
+            );
+
+            logger.info({
+              draftId: draft._id.toString(),
+              gmailDraftId: draft.gmail_draft_id,
+              threadId,
+              investorId: draft.investorId?.toString(),
+            }, 'backfilled gmail_thread_id');
+
+            backfilled++;
+          } else {
+            logger.warn({
+              draftId: draft._id.toString(),
+              gmailDraftId: draft.gmail_draft_id,
+            }, 'draft found in gmail but no threadId returned');
+          }
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          const errCode = (err as { code?: number }).code;
+
+          if (errCode === 404) {
+            logger.info({
+              draftId: draft._id.toString(),
+              gmailDraftId: draft.gmail_draft_id,
+            }, 'draft not found in gmail (may have been sent), skipping backfill');
+          } else {
+            logger.error({
+              error: errMsg,
+              draftId: draft._id.toString(),
+              gmailDraftId: draft.gmail_draft_id,
+            }, 'error fetching draft from gmail for backfill');
+            errors++;
+          }
+        }
+      }
+
+      logger.info({ backfilled, errors, total: draftsNeedingBackfill.length }, 'thread_id backfill completed');
+
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      logger.error({ error: errorMsg }, 'backfill-thread-ids endpoint failed');
+      res.status(500).json({ status: 'failed', error: errorMsg });
     }
   });
 

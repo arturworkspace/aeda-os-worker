@@ -12,6 +12,27 @@ import { logger } from '../logger.js';
 
 export const JOB_NAME = 'investor.followUpScheduler';
 
+// Forbidden placeholders that must be filled in before creating a draft
+const FORBIDDEN_PLACEHOLDERS = [
+  '[PENDING FINANCIAL UPDATE]',
+  '[First Name]',
+  '[FIRST NAME]',
+];
+
+interface PlaceholderValidationResult {
+  valid: boolean;
+  foundPlaceholder?: string;
+}
+
+function validateNoForbiddenPlaceholders(subject: string, body: string): PlaceholderValidationResult {
+  for (const placeholder of FORBIDDEN_PLACEHOLDERS) {
+    if (body.includes(placeholder) || subject.includes(placeholder)) {
+      return { valid: false, foundPlaceholder: placeholder };
+    }
+  }
+  return { valid: true };
+}
+
 const FOLLOW_UP_1_BUSINESS_DAYS = 5;
 const FOLLOW_UP_2_BUSINESS_DAYS = 7;
 
@@ -184,6 +205,52 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
         totalCostUsd += result.costUsd;
         const draftText = getTextContent(result.response);
         const draftContent = parseDraftResponse(draftText);
+
+        // Validate no forbidden placeholders BEFORE saving draft
+        const placeholderCheck = validateNoForbiddenPlaceholders(draftContent.subject, draftContent.body);
+        if (!placeholderCheck.valid) {
+          logger.error({
+            investorId: investor._id,
+            investorName: investor.name,
+            placeholder: placeholderCheck.foundPlaceholder,
+            followUpStage: 'followup1',
+          }, 'BLOCKED: AI-generated follow-up 1 draft contains unfilled placeholder - not saving');
+
+          // Create error inbox item
+          const errorInboxItem = new InboxItem({
+            recipient: 'julia@aeda.internal',
+            sender_email: 'system@aeda.internal',
+            sender_name: 'aeda System',
+            subject: `⚠️ Follow-up 1 BLOCKED for ${investor.name}: unfilled placeholder`,
+            body_raw: '',
+            body_sanitized: '',
+            body_hardened: '',
+            body_text: `The AI-generated follow-up 1 for ${investor.name} was blocked because it contains: ${placeholderCheck.foundPlaceholder}\n\nPlease manually draft this email.`,
+            body_html: '',
+            attachments: [],
+            agent_commentary: `Draft blocked: ${placeholderCheck.foundPlaceholder}`,
+            received_at: new Date(),
+            message_id: `placeholder-block-fu1-${(investor._id as Types.ObjectId).toHexString()}-${Date.now()}`,
+            in_reply_to: null,
+            crm_match: {
+              matched: true,
+              investor_id: (investor._id as Types.ObjectId).toHexString(),
+              investor_name: investor.name,
+              matched_on: null,
+            },
+            routing: {
+              artur_classification: 'system_alert',
+              routed_to_agent: 'julia',
+              artur_brief: `Follow-up 1 blocked for ${investor.name}`,
+              lilit_task_id: null,
+            },
+            processing_status: 'blocked',
+            processing_error: `Unfilled placeholder: ${placeholderCheck.foundPlaceholder}`,
+            cost_usd: 0,
+          });
+          await errorInboxItem.save();
+          continue; // Skip this investor, move to next
+        }
 
         // Create draft in os_email_drafts
         const emailDraft = await emailDraftRepo.create({
@@ -360,6 +427,52 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
         totalCostUsd += result.costUsd;
         const draftText = getTextContent(result.response);
         const draftContent = parseDraftResponse(draftText);
+
+        // Validate no forbidden placeholders BEFORE saving draft
+        const placeholderCheck2 = validateNoForbiddenPlaceholders(draftContent.subject, draftContent.body);
+        if (!placeholderCheck2.valid) {
+          logger.error({
+            investorId: investor._id,
+            investorName: investor.name,
+            placeholder: placeholderCheck2.foundPlaceholder,
+            followUpStage: 'followup2',
+          }, 'BLOCKED: AI-generated follow-up 2 draft contains unfilled placeholder - not saving');
+
+          // Create error inbox item
+          const errorInboxItem2 = new InboxItem({
+            recipient: 'julia@aeda.internal',
+            sender_email: 'system@aeda.internal',
+            sender_name: 'aeda System',
+            subject: `⚠️ Follow-up 2 BLOCKED for ${investor.name}: unfilled placeholder`,
+            body_raw: '',
+            body_sanitized: '',
+            body_hardened: '',
+            body_text: `The AI-generated follow-up 2 for ${investor.name} was blocked because it contains: ${placeholderCheck2.foundPlaceholder}\n\nPlease manually draft this email.`,
+            body_html: '',
+            attachments: [],
+            agent_commentary: `Draft blocked: ${placeholderCheck2.foundPlaceholder}`,
+            received_at: new Date(),
+            message_id: `placeholder-block-fu2-${(investor._id as Types.ObjectId).toHexString()}-${Date.now()}`,
+            in_reply_to: null,
+            crm_match: {
+              matched: true,
+              investor_id: (investor._id as Types.ObjectId).toHexString(),
+              investor_name: investor.name,
+              matched_on: null,
+            },
+            routing: {
+              artur_classification: 'system_alert',
+              routed_to_agent: 'julia',
+              artur_brief: `Follow-up 2 blocked for ${investor.name}`,
+              lilit_task_id: null,
+            },
+            processing_status: 'blocked',
+            processing_error: `Unfilled placeholder: ${placeholderCheck2.foundPlaceholder}`,
+            cost_usd: 0,
+          });
+          await errorInboxItem2.save();
+          continue; // Skip this investor, move to next
+        }
 
         // Create draft in os_email_drafts
         const emailDraft = await emailDraftRepo.create({
