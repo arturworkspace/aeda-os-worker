@@ -102,7 +102,30 @@ export async function runGmailSendStatusSync(): Promise<GmailSendStatusSyncResul
     // PART 1: Check draft → sent status (existing behavior)
     // ═══════════════════════════════════════════════════════════════════
     const pendingDrafts = await emailDraftRepo.findPendingSendStatus();
-    logger.info({ count: pendingDrafts.length }, 'checking gmail send status for drafts');
+
+    // Debug: log all draft IDs and their investor IDs for tracing
+    const draftSummary = pendingDrafts.map(d => ({
+      draftId: d._id.toString(),
+      investorId: d.investorId?.toString() || 'none',
+      gmailDraftId: d.gmail_draft_id || 'none',
+      status: d.status,
+      draftType: d.draftType || 'unknown',
+    }));
+    logger.info({ count: pendingDrafts.length, drafts: draftSummary }, 'checking gmail send status for drafts');
+
+    // Debug: specifically check if HongShan's draft exists with any status
+    const HONGSHAN_INVESTOR_ID = '6a4d659b6200b6e472d938c8';
+    const hongShanDrafts = await emailDraftRepo.find({ investorId: new Types.ObjectId(HONGSHAN_INVESTOR_ID) });
+    logger.info({
+      hongShanDraftCount: hongShanDrafts.length,
+      hongShanDrafts: hongShanDrafts.map(d => ({
+        draftId: d._id.toString(),
+        status: d.status,
+        gmailDraftId: d.gmail_draft_id || 'MISSING',
+        gmailThreadId: d.gmail_thread_id || 'MISSING',
+        draftType: d.draftType || 'MISSING',
+      })),
+    }, 'DEBUG: HongShan draft lookup');
 
     for (const draft of pendingDrafts) {
       checkedCount++;
