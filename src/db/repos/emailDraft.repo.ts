@@ -118,4 +118,25 @@ export const emailDraftRepo = {
   async getByAgent(agent: string, limit = 50): Promise<IEmailDraftDocument[]> {
     return EmailDraft.find({ drafted_by_agent: agent }).sort({ created_at: -1 }).limit(limit).exec();
   },
+
+  async findPendingSendStatus(): Promise<IEmailDraftDocument[]> {
+    return EmailDraft.find({
+      status: 'pushed_to_gmail',
+      gmail_draft_id: { $exists: true, $ne: null },
+    }).exec();
+  },
+
+  async markAsSent(
+    id: Types.ObjectId | string,
+    sentAt: Date
+  ): Promise<IEmailDraftDocument | null> {
+    return EmailDraft.findByIdAndUpdate(
+      id,
+      {
+        status: 'sent',
+        sent_at: sentAt,
+      },
+      { new: true }
+    ).exec();
+  },
 };

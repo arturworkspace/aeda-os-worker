@@ -3,6 +3,7 @@ import { Agenda } from 'agenda';
 import { createWebhookRouter } from './webhookInbound.js';
 import { createInvestorResearchRouter } from './investorResearch.js';
 import { runFollowUpScheduler } from '../jobs/investor.followUpScheduler.js';
+import { runGmailSendStatusSync } from '../jobs/outreach.gmailSendStatusSync.js';
 import { logger } from '../logger.js';
 
 export function registerRoutes(app: Express, agenda: Agenda): void {
@@ -49,6 +50,25 @@ export function registerRoutes(app: Express, agenda: Agenda): void {
   }, async (_req, res) => {
     try {
       const result = await runFollowUpScheduler();
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ error: msg });
+    }
+  });
+
+  // Gmail send status sync on-demand trigger (protected by secret)
+  app.post('/jobs/gmail-send-status-sync/trigger-now', (req, res, next) => {
+    const provided = req.headers['x-trigger-secret'];
+    const expected = process.env['TRIGGER_SECRET'];
+    if (!expected || provided !== expected) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    next();
+  }, async (_req, res) => {
+    try {
+      const result = await runGmailSendStatusSync();
       res.json({ ok: true, ...result });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

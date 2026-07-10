@@ -18,6 +18,7 @@ export interface IEmailDraft {
   status: DraftStatus;
   created_at: Date;
   pushed_at: Date | null;
+  sent_at?: Date | null;
   // Investor follow-up metadata (optional)
   investorId?: Types.ObjectId;
   followUpStage?: 'followup1' | 'followup2';
@@ -47,6 +48,7 @@ const emailDraftSchema = new Schema<IEmailDraft>(
     status: { type: String, enum: DRAFT_STATUSES, default: 'pending' },
     created_at: { type: Date, default: () => new Date() },
     pushed_at: { type: Date, default: null },
+    sent_at: { type: Date, default: null },
     // Investor follow-up metadata
     investorId: { type: Schema.Types.ObjectId, ref: 'Investor', required: false },
     followUpStage: { type: String, enum: ['followup1', 'followup2'], required: false },
