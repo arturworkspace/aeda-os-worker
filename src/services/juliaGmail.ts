@@ -332,6 +332,108 @@ export async function searchThreads(query: string, maxResults = 10): Promise<Arr
   }
 }
 
+/**
+ * Send a draft via Gmail API (users.drafts.send).
+ * This sends the draft in place, preserving thread linkage.
+ * Returns the sent message ID.
+ */
+export async function juliaSendDraft(
+  draftId: string,
+  newToEmail?: string
+): Promise<{ messageId: string; threadId: string }> {
+  if (!juliaGmailClient || !juliaOauth2Client) {
+    throw new Error('julia gmail client not initialized');
+  }
+
+  await refreshJuliaAccessToken();
+
+  // If newToEmail is provided, we need to fetch the draft, modify the To header, and update it first
+  if (newToEmail) {
+    // Fetch the existing draft
+    const draftResponse = await juliaGmailClient.users.drafts.get({
+      userId: 'me',
+      id: draftId,
+      format: 'full',
+    });
+
+    const message = draftResponse.data.message;
+    if (!message?.payload?.headers) {
+      throw new Error('Draft has no message payload');
+    }
+
+    // Extract existing headers
+    const headers = message.payload.headers;
+    const subject = headers.find(h => h.name?.toLowerCase() === 'subject')?.value ?? '';
+    const inReplyTo = headers.find(h => h.name?.toLowerCase() === 'in-reply-to')?.value;
+    const references = headers.find(h => h.name?.toLowerCase() === 'references')?.value;
+    const messageIdHeader = headers.find(h => h.name?.toLowerCase() === 'message-id')?.value;
+
+    // Extract body from the message
+    const { text } = extractBodyParts(message.payload);
+
+    // Build new raw email with updated To header
+    const newHeaders = [
+      `Date: ${new Date().toUTCString()}`,
+      `From: julia@aedawallet.com`,
+      `To: ${newToEmail}`,
+      `Subject: ${encodeRfc2047(subject)}`,
+      `MIME-Version: 1.0`,
+      `Content-Type: text/plain; charset="UTF-8"`,
+      `Content-Transfer-Encoding: 8bit`,
+    ];
+
+    if (messageIdHeader) {
+      newHeaders.push(`Message-ID: ${messageIdHeader}`);
+    }
+    if (inReplyTo) {
+      newHeaders.push(`In-Reply-To: ${inReplyTo}`);
+    }
+    if (references) {
+      newHeaders.push(`References: ${references}`);
+    }
+
+    const rawEmail = newHeaders.join('\r\n') + '\r\n\r\n' + text;
+    const raw = Buffer.from(rawEmail)
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    // Update the draft with the new To header
+    await juliaGmailClient.users.drafts.update({
+      userId: 'me',
+      id: draftId,
+      requestBody: {
+        message: {
+          raw,
+          threadId: message.threadId ?? undefined,
+        },
+      },
+    });
+
+    logger.info({ draftId, newToEmail }, 'draft updated with new To header before sending');
+  }
+
+  // Send the draft
+  const sendResponse = await juliaGmailClient.users.drafts.send({
+    userId: 'me',
+    requestBody: {
+      id: draftId,
+    },
+  });
+
+  const sentMessageId = sendResponse.data.id;
+  const sentThreadId = sendResponse.data.threadId;
+
+  if (!sentMessageId || !sentThreadId) {
+    throw new Error('Draft send returned no message ID or thread ID');
+  }
+
+  logger.info({ draftId, sentMessageId, sentThreadId }, 'julia gmail draft sent');
+
+  return { messageId: sentMessageId, threadId: sentThreadId };
+}
+
 export async function getThreadById(threadId: string): Promise<JuliaThread | null> {
   if (!juliaGmailClient || !juliaOauth2Client) {
     logger.warn('julia gmail client not initialized, cannot fetch thread');

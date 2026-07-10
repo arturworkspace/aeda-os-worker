@@ -11,7 +11,7 @@ import { writeAuditEvent } from '../core/auditLog.js';
 import { estimateCostUsd } from '../config/pricing.js';
 import { logger } from '../logger.js';
 import { getPersona } from '../agents/personas.js';
-import { isJuliaGmailConfigured, juliaCreateDraft, searchThreads, getThreadById } from '../services/juliaGmail.js';
+import { isJuliaGmailConfigured, juliaCreateDraft, juliaSendDraft, searchThreads, getThreadById } from '../services/juliaGmail.js';
 
 const RESEARCH_DAILY_BUDGET_USD = Number(process.env['RESEARCH_DAILY_BUDGET_USD']) || 5;
 const JOB_NAME = 'investor-research';
@@ -2006,6 +2006,118 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       logger.error({ error: errorMsg, investorId }, 'fix-replied-at failed');
+      res.status(500).json({ error: errorMsg });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // REDIRECT-AND-SEND-DRAFT: Send a draft via Gmail API with optional To redirect
+  // Used when Gmail web UI won't render a draft editable (thread corruption workaround)
+  // ═══════════════════════════════════════════════════════════════════════════
+  router.post('/redirect-and-send-draft', async (req: Request, res: Response) => {
+    const provided = req.headers['x-trigger-secret'];
+    const expected = process.env['TRIGGER_SECRET'];
+    if (!expected || provided !== expected) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { investorId, draftGmailId, toEmail } = req.body as {
+      investorId?: string;
+      draftGmailId?: string;
+      toEmail?: string;
+    };
+
+    if (!investorId || !Types.ObjectId.isValid(investorId)) {
+      res.status(400).json({ error: 'Invalid investorId' });
+      return;
+    }
+    if (!draftGmailId) {
+      res.status(400).json({ error: 'draftGmailId is required' });
+      return;
+    }
+    if (!toEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(toEmail)) {
+      res.status(400).json({ error: 'Valid toEmail is required' });
+      return;
+    }
+
+    try {
+      const investorObjId = new Types.ObjectId(investorId);
+      const investor = await Investor.findById(investorObjId).exec();
+      if (!investor) {
+        res.status(404).json({ error: 'Investor not found' });
+        return;
+      }
+
+      // Find the latest draft for this investor and verify gmailDraftId matches
+      const drafts = await emailDraftRepo.find({
+        investorId: investorObjId,
+        gmail_draft_id: { $exists: true, $ne: null },
+      });
+
+      if (drafts.length === 0) {
+        res.status(404).json({ error: 'No drafts with gmail_draft_id found for this investor' });
+        return;
+      }
+
+      // Find the draft that matches the provided draftGmailId
+      const matchingDraft = drafts.find(d => d.gmail_draft_id === draftGmailId);
+      if (!matchingDraft) {
+        res.status(400).json({
+          error: 'draftGmailId does not match any stored draft for this investor',
+          storedDraftIds: drafts.map(d => d.gmail_draft_id),
+        });
+        return;
+      }
+
+      if (!isJuliaGmailConfigured()) {
+        res.status(500).json({ error: 'Julia Gmail client not configured' });
+        return;
+      }
+
+      // Send the draft via Gmail API
+      const sendResult = await juliaSendDraft(draftGmailId, toEmail);
+
+      // Update the draft record to reflect it was sent
+      matchingDraft.status = 'sent';
+      matchingDraft.gmail_sent_message_id = sendResult.messageId;
+      await matchingDraft.save();
+
+      logger.info({
+        investorId,
+        investorName: investor.name,
+        draftGmailId,
+        toEmail,
+        sentMessageId: sendResult.messageId,
+        threadId: sendResult.threadId,
+      }, 'draft sent via redirect-and-send-draft endpoint');
+
+      await writeAuditEvent({
+        actor: 'system',
+        actorType: 'system',
+        eventType: 'investor.draft_sent_via_api',
+        subjectId: investorObjId,
+        payload: {
+          investorId,
+          investorName: investor.name,
+          draftGmailId,
+          toEmail,
+          sentMessageId: sendResult.messageId,
+          threadId: sendResult.threadId,
+          draftType: matchingDraft.draftType || matchingDraft.followUpStage,
+        },
+      });
+
+      res.json({
+        status: 'sent',
+        investorId,
+        investorName: investor.name,
+        sentMessageId: sendResult.messageId,
+        threadId: sendResult.threadId,
+      });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      logger.error({ error: errorMsg, investorId, draftGmailId }, 'redirect-and-send-draft failed');
       res.status(500).json({ error: errorMsg });
     }
   });
