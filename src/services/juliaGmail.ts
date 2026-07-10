@@ -175,6 +175,25 @@ export function isJuliaGmailConfigured(): boolean {
   return juliaGmailClient !== null;
 }
 
+/**
+ * Delete a Gmail draft by ID.
+ * Used when a reply is detected to auto-remove pending follow-up drafts.
+ */
+export async function juliaDeleteDraft(draftId: string): Promise<void> {
+  if (!juliaGmailClient || !juliaOauth2Client) {
+    throw new Error('julia gmail client not initialized');
+  }
+
+  await refreshJuliaAccessToken();
+
+  await juliaGmailClient.users.drafts.delete({
+    userId: 'me',
+    id: draftId,
+  });
+
+  logger.info({ draftId }, 'julia gmail draft deleted');
+}
+
 export interface JuliaThreadMessage {
   id: string;
   threadId: string;

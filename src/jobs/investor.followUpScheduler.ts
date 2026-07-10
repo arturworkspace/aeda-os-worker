@@ -123,6 +123,12 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
     for (const investor of needingFollowUp1) {
       if (!investor.firstEmailSentAt) continue;
 
+      // Round 4: Stop cadence permanently if investor has replied
+      if (investor.hasReply) {
+        logger.info({ investorId: investor._id, name: investor.name }, 'skipping follow-up 1 - investor has replied');
+        continue;
+      }
+
       if (!shouldTriggerFollowUp1(investor.firstEmailSentAt, now)) continue;
       const daysSinceFirst = businessDaysBetween(investor.firstEmailSentAt, now);
 
@@ -286,6 +292,12 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
 
       for (const investor of needingFollowUp2) {
         if (!investor.followUp1SentAt) continue;
+
+        // Round 4: Stop cadence permanently if investor has replied
+        if (investor.hasReply) {
+          logger.info({ investorId: investor._id, name: investor.name }, 'skipping follow-up 2 - investor has replied');
+          continue;
+        }
 
         if (!shouldTriggerFollowUp2(investor.followUp1SentAt, now)) continue;
         const daysSinceFollowUp1 = businessDaysBetween(investor.followUp1SentAt, now);

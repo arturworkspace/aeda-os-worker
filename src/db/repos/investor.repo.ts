@@ -73,7 +73,72 @@ export const investorRepo = {
   async findAwaitingReply(): Promise<IInvestorDocument[]> {
     return Investor.find({
       emailThreadId: { $exists: true, $nin: [null, ''] },
-      repliedAt: { $exists: false },
+      hasReply: { $ne: true },
+    }).exec();
+  },
+
+  /**
+   * Mark investor as having received a reply (stops cadence)
+   */
+  async markReplyReceived(
+    id: Types.ObjectId | string,
+    sentiment: 'positive' | 'negative'
+  ): Promise<IInvestorDocument | null> {
+    const now = new Date();
+    return Investor.findByIdAndUpdate(
+      id,
+      {
+        hasReply: true,
+        replyReceivedAt: now,
+        replySentiment: sentiment,
+        stageConfirmed: false,
+        $push: { activityLog: { action: `reply_received_${sentiment}`, at: now } },
+      },
+      { new: true }
+    ).exec();
+  },
+
+  /**
+   * Confirm the sentiment classification (Artur reviewed it)
+   */
+  async confirmStage(id: Types.ObjectId | string): Promise<IInvestorDocument | null> {
+    const now = new Date();
+    return Investor.findByIdAndUpdate(
+      id,
+      {
+        stageConfirmed: true,
+        $push: { activityLog: { action: 'stage_confirmed', at: now } },
+      },
+      { new: true }
+    ).exec();
+  },
+
+  /**
+   * Correct sentiment classification (move between Answered <-> Rejected)
+   */
+  async correctSentiment(
+    id: Types.ObjectId | string,
+    newSentiment: 'positive' | 'negative'
+  ): Promise<IInvestorDocument | null> {
+    const now = new Date();
+    return Investor.findByIdAndUpdate(
+      id,
+      {
+        replySentiment: newSentiment,
+        stageConfirmed: true,
+        $push: { activityLog: { action: `sentiment_corrected_to_${newSentiment}`, at: now } },
+      },
+      { new: true }
+    ).exec();
+  },
+
+  /**
+   * Find investors with gmail_thread_id on their drafts (for reply detection)
+   */
+  async findWithGmailThread(): Promise<IInvestorDocument[]> {
+    return Investor.find({
+      firstEmailSentAt: { $exists: true, $ne: null },
+      hasReply: { $ne: true },
     }).exec();
   },
 };

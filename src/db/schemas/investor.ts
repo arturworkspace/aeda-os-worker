@@ -11,7 +11,7 @@ export interface IInvestor {
   email: string;
   website: string;
   type: 'VC' | 'Angel' | 'Family Office' | 'Corporate' | 'Accelerator';
-  stage: 'Research' | 'Outreach' | 'First Contact' | 'Meeting' | 'Due Diligence' | 'Term Sheet' | 'Closed' | 'Passed';
+  stage: 'Research' | 'Outreach' | 'First Contact' | 'Meeting' | 'Term Sheet' | 'Closed' | 'Passed';
   checkSize: number;
   priority: 1 | 2 | 3;
   source: string;
@@ -25,6 +25,11 @@ export interface IInvestor {
   followUp2SentAt?: Date;
   repliedAt?: Date;
   emailThreadId?: string;
+  // Reply detection fields (Round 4)
+  hasReply?: boolean;
+  replyReceivedAt?: Date;
+  replySentiment?: 'positive' | 'negative' | null;
+  stageConfirmed?: boolean;
   activityLog?: IActivityLogEntry[];
   createdAt: Date;
   updatedAt: Date;
@@ -53,7 +58,7 @@ const investorSchema = new Schema<IInvestor>(
     },
     stage: {
       type: String,
-      enum: ['Research', 'Outreach', 'First Contact', 'Meeting', 'Due Diligence', 'Term Sheet', 'Closed', 'Passed'],
+      enum: ['Research', 'Outreach', 'First Contact', 'Meeting', 'Term Sheet', 'Closed', 'Passed'],
       default: 'Research',
     },
     checkSize: { type: Number, default: 0 },
@@ -69,6 +74,11 @@ const investorSchema = new Schema<IInvestor>(
     followUp2SentAt: { type: Date, required: false },
     repliedAt: { type: Date, required: false },
     emailThreadId: { type: String, required: false },
+    // Reply detection fields (Round 4)
+    hasReply: { type: Boolean, required: false, default: false },
+    replyReceivedAt: { type: Date, required: false },
+    replySentiment: { type: String, enum: ['positive', 'negative', null], required: false },
+    stageConfirmed: { type: Boolean, required: false, default: false },
     activityLog: { type: [activityLogSchema], default: [] },
   },
   {
