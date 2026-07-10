@@ -24,12 +24,14 @@ interface PlaceholderValidationResult {
   foundPlaceholder?: string;
 }
 
-function validateNoForbiddenPlaceholders(subject: string, body: string): PlaceholderValidationResult {
+function validateNoForbiddenPlaceholders(subject: string, body: string, investorName?: string): PlaceholderValidationResult {
   for (const placeholder of FORBIDDEN_PLACEHOLDERS) {
     if (body.includes(placeholder) || subject.includes(placeholder)) {
+      console.log(`[placeholder-gate] BLOCKED draft for "${investorName || 'unknown'}" - found: ${placeholder}`);
       return { valid: false, foundPlaceholder: placeholder };
     }
   }
+  console.log(`[placeholder-gate] PASSED validation for "${investorName || 'unknown'}"`);
   return { valid: true };
 }
 
@@ -207,7 +209,7 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
         const draftContent = parseDraftResponse(draftText);
 
         // Validate no forbidden placeholders BEFORE saving draft
-        const placeholderCheck = validateNoForbiddenPlaceholders(draftContent.subject, draftContent.body);
+        const placeholderCheck = validateNoForbiddenPlaceholders(draftContent.subject, draftContent.body, investor.name);
         if (!placeholderCheck.valid) {
           logger.error({
             investorId: investor._id,
@@ -429,7 +431,7 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
         const draftContent = parseDraftResponse(draftText);
 
         // Validate no forbidden placeholders BEFORE saving draft
-        const placeholderCheck2 = validateNoForbiddenPlaceholders(draftContent.subject, draftContent.body);
+        const placeholderCheck2 = validateNoForbiddenPlaceholders(draftContent.subject, draftContent.body, investor.name);
         if (!placeholderCheck2.valid) {
           logger.error({
             investorId: investor._id,
