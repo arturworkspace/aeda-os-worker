@@ -68,11 +68,12 @@ export const investorRepo = {
   },
 
   /**
-   * Find investors with emailThreadId set but no reply yet
+   * Find investors awaiting reply - those with firstEmailSentAt set but no reply yet.
+   * Thread ID lookup happens via email drafts, not the investor record.
    */
   async findAwaitingReply(): Promise<IInvestorDocument[]> {
     return Investor.find({
-      emailThreadId: { $exists: true, $nin: [null, ''] },
+      firstEmailSentAt: { $exists: true, $ne: null },
       hasReply: { $ne: true },
     }).exec();
   },
