@@ -11,7 +11,7 @@ import { writeAuditEvent } from '../core/auditLog.js';
 import { estimateCostUsd } from '../config/pricing.js';
 import { logger } from '../logger.js';
 import { getPersona } from '../agents/personas.js';
-import { isJuliaGmailConfigured, juliaCreateDraft } from '../services/juliaGmail.js';
+import { isJuliaGmailConfigured, juliaCreateDraft, searchThreads, getThreadById } from '../services/juliaGmail.js';
 
 const RESEARCH_DAILY_BUDGET_USD = Number(process.env['RESEARCH_DAILY_BUDGET_USD']) || 5;
 const JOB_NAME = 'investor-research';
@@ -824,6 +824,15 @@ At least one of the 3 subject options must reference something specific to the r
 CTA:
 End every email with exactly this line (adjust only "pre-seed" if the round stage changes in the future): "We're currently raising our pre-seed round. Open to receiving the short deck?" Do not use "Would it be useful if I sent..." or other CTA phrasing — use this exact sentence as the closing ask every time.
 
+SIGNATURE:
+After the CTA, always include this exact signature block (with the blank line before it):
+
+Best Regards
+Julia Maklakova
+Fundraising manager
+
+Do NOT include a company name or website — Artur adds his own signature separately.
+
 VARIED OPENINGS:
 Avoid defaulting to the same "Your [Firm]'s investment in X caught my attention" structure every time. Vary the opening across drafts — sometimes lead with the aeda one-liner, sometimes the investor-specific hook, sometimes a direct question.
 
@@ -938,7 +947,8 @@ async function runFirstEmailDraftAsync(
   investorObjId: Types.ObjectId,
   investorId: string,
   investor: IInvestorDocument,
-  research: IInvestorResearchDocument
+  research: IInvestorResearchDocument,
+  testModeEmail?: string
 ): Promise<void> {
   const startTime = Date.now();
   let totalCostUsd = 0;
@@ -1055,13 +1065,20 @@ CONTACT:
     }
 
     // Determine email address and contact confidence
-    const toEmail = research.contact?.email || investor.email || '';
+    const realEmail = research.contact?.email || investor.email || '';
     const contactConfidence = research.contact?.confidence || null;
 
     // Skip if no email address available
-    if (!toEmail) {
+    if (!realEmail) {
       logger.warn({ investorId, investorName: investor.name }, 'no email address available, cannot create draft');
       return;
+    }
+
+    // Test mode: override recipient with test email address
+    const toEmail = testModeEmail || realEmail;
+    const isTestMode = !!testModeEmail;
+    if (isTestMode) {
+      logger.info({ investorId, investorName: investor.name, testModeEmail }, 'TEST MODE: redirecting draft to test address');
     }
 
     // Validate no forbidden placeholders BEFORE saving draft
@@ -1123,21 +1140,24 @@ CONTACT:
       personalizationReasoning: parsedDraft.personalizationReasoning,
       qualityScore: qualityResult.score,
       contactConfidence,
+      ...(isTestMode ? { isTestMode: true, realRecipient: realEmail } : {}),
     });
 
     // Create InboxItem so draft appears in Julia's inbox
+    const testModePrefix = isTestMode ? '🧪 [TEST] ' : '';
+    const testModeNote = isTestMode ? ` (TEST MODE: sends to ${testModeEmail}, real recipient: ${realEmail})` : '';
     const inboxItem = new InboxItem({
       recipient: 'julia@aeda.internal',
       sender_email: 'system@aeda.internal',
       sender_name: 'aeda System',
-      subject: `First outreach email drafted for ${investor.name}`,
+      subject: `${testModePrefix}First outreach email drafted for ${investor.name}`,
       body_raw: '',
       body_sanitized: '',
       body_hardened: '',
       body_text: parsedDraft.body,
       body_html: '',
       attachments: [],
-      agent_commentary: `First outreach email ready for review. Investor: ${investor.name} (${investor.firm || 'Unknown'}). Quality score: ${qualityResult.score}/10.`,
+      agent_commentary: `${testModePrefix}First outreach email ready for review. Investor: ${investor.name} (${investor.firm || 'Unknown'}). Quality score: ${qualityResult.score}/10.${testModeNote}`,
       draft_text: parsedDraft.body,
       received_at: new Date(),
       message_id: `investor-first-email-draft-${(emailDraft._id as Types.ObjectId).toHexString()}`,
@@ -1151,7 +1171,7 @@ CONTACT:
       routing: {
         artur_classification: 'investor_outreach',
         routed_to_agent: 'julia',
-        artur_brief: `First outreach draft for ${investor.name}`,
+        artur_brief: `${testModePrefix}First outreach draft for ${investor.name}`,
         lilit_task_id: null,
       },
       draft_id: emailDraft._id as Types.ObjectId,
@@ -1442,9 +1462,16 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
       return;
     }
 
-    const { investorId } = req.body as { investorId?: string };
+    const { investorId, testModeEmail } = req.body as { investorId?: string; testModeEmail?: string };
     if (!investorId || !Types.ObjectId.isValid(investorId)) {
       res.status(400).json({ error: 'Invalid investorId' });
+      return;
+    }
+
+    // Validate testModeEmail if provided (must be a valid email)
+    const isTestMode = !!testModeEmail;
+    if (isTestMode && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(testModeEmail)) {
+      res.status(400).json({ error: 'Invalid testModeEmail address' });
       return;
     }
 
@@ -1507,10 +1534,10 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
       }
 
       // Step 6: Respond immediately, then run drafting async
-      res.json({ status: 'drafting', investorId });
+      res.json({ status: 'drafting', investorId, testMode: isTestMode });
 
       // Fire-and-forget: run draft generation in background
-      runFirstEmailDraftAsync(investorObjId, investorId, investor, research).catch((err) => {
+      runFirstEmailDraftAsync(investorObjId, investorId, investor, research, testModeEmail).catch((err) => {
         logger.error({ error: err instanceof Error ? err.message : String(err), investorId }, 'unhandled error in async draft generation');
       });
 
@@ -1738,6 +1765,249 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
       testCase: testCase || 'pending_financial',
       message: 'Validation passed - draft would be created normally',
     });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SEARCH-GMAIL-THREADS: Search Julia's Gmail for threads by query
+  // Used to find correct thread IDs for backfill/repair
+  // ═══════════════════════════════════════════════════════════════════════════
+  router.post('/search-gmail-threads', async (req: Request, res: Response) => {
+    const provided = req.headers['x-trigger-secret'];
+    const expected = process.env['TRIGGER_SECRET'];
+    if (!expected || provided !== expected) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { query, maxResults } = req.body as { query?: string; maxResults?: number };
+    if (!query) {
+      res.status(400).json({ error: 'query is required' });
+      return;
+    }
+
+    try {
+      const threads = await searchThreads(query, maxResults || 10);
+
+      // Optionally fetch full thread details for each result
+      const detailedThreads = await Promise.all(
+        threads.map(async (t) => {
+          const full = await getThreadById(t.threadId);
+          return {
+            threadId: t.threadId,
+            snippet: t.snippet,
+            messageCount: full?.messages.length ?? 0,
+            messages: full?.messages.map((m) => ({
+              from: m.from,
+              to: m.to,
+              subject: m.subject,
+              date: m.date,
+              snippet: m.snippet,
+            })) ?? [],
+          };
+        })
+      );
+
+      res.json({ threads: detailedThreads });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      logger.error({ error: errorMsg, query }, 'search-gmail-threads failed');
+      res.status(500).json({ error: errorMsg });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // FIX-THREAD-ID: Update an investor's draft thread ID after manual recompose
+  // Used to repair stale thread IDs when user discards system draft and recomposes in Gmail
+  // ═══════════════════════════════════════════════════════════════════════════
+  router.post('/fix-thread-id', async (req: Request, res: Response) => {
+    const provided = req.headers['x-trigger-secret'];
+    const expected = process.env['TRIGGER_SECRET'];
+    if (!expected || provided !== expected) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { investorId, newThreadId } = req.body as { investorId?: string; newThreadId?: string };
+    if (!investorId || !Types.ObjectId.isValid(investorId)) {
+      res.status(400).json({ error: 'Invalid investorId' });
+      return;
+    }
+    if (!newThreadId) {
+      res.status(400).json({ error: 'newThreadId is required' });
+      return;
+    }
+
+    try {
+      const investorObjId = new Types.ObjectId(investorId);
+
+      // Find the latest draft for this investor
+      const drafts = await emailDraftRepo.find({
+        investorId: investorObjId,
+        status: { $in: ['pushed_to_gmail', 'sent'] },
+      });
+
+      if (drafts.length === 0) {
+        res.status(404).json({ error: 'No drafts found for this investor' });
+        return;
+      }
+
+      // Update all drafts for this investor to use the new thread ID
+      const updateResult = await Promise.all(
+        drafts.map(async (draft) => {
+          const oldThreadId = draft.gmail_thread_id;
+          draft.gmail_thread_id = newThreadId;
+          await draft.save();
+          return { draftId: draft._id.toString(), oldThreadId, newThreadId };
+        })
+      );
+
+      logger.info({ investorId, newThreadId, draftsUpdated: updateResult.length }, 'thread ID fixed for investor drafts');
+
+      res.json({
+        status: 'success',
+        investorId,
+        newThreadId,
+        draftsUpdated: updateResult,
+      });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      logger.error({ error: errorMsg, investorId, newThreadId }, 'fix-thread-id failed');
+      res.status(500).json({ error: errorMsg });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // RESET-INVESTOR-OUTREACH: Reset an investor to pre-outreach state
+  // Used to clean up test investors without touching Gmail
+  // ═══════════════════════════════════════════════════════════════════════════
+  router.post('/reset-investor-outreach', async (req: Request, res: Response) => {
+    const provided = req.headers['x-trigger-secret'];
+    const expected = process.env['TRIGGER_SECRET'];
+    if (!expected || provided !== expected) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { investorId } = req.body as { investorId?: string };
+    if (!investorId || !Types.ObjectId.isValid(investorId)) {
+      res.status(400).json({ error: 'Invalid investorId' });
+      return;
+    }
+
+    try {
+      const investorObjId = new Types.ObjectId(investorId);
+
+      // 1. Find investor
+      const investor = await Investor.findById(investorObjId).exec();
+      if (!investor) {
+        res.status(404).json({ error: 'Investor not found' });
+        return;
+      }
+
+      const investorName = investor.name;
+
+      // 2. Delete all drafts for this investor
+      const drafts = await emailDraftRepo.find({ investorId: investorObjId });
+      const deletedDraftIds: string[] = [];
+      for (const draft of drafts) {
+        deletedDraftIds.push(draft._id.toString());
+        await draft.deleteOne();
+      }
+
+      // 3. Delete any inbox items related to this investor
+      const inboxDeleteResult = await InboxItem.deleteMany({
+        'crm_match.investor_id': investorId,
+      });
+
+      // 4. Reset investor document to pre-outreach state
+      // Must $unset repliedAt (not just null) because findNeedingFollowUp1 uses { $exists: false }
+      await Investor.findByIdAndUpdate(investorObjId, {
+        $set: {
+          stage: 'Research',
+          email: '',
+          hasReply: false,
+          replyReceivedAt: null,
+          replySentiment: null,
+          stageConfirmed: false,
+          stageOverride: false,
+          firstEmailSentAt: null,
+          followUp1SentAt: null,
+          followUp2SentAt: null,
+          lastContact: '',
+          nextAction: '',
+          nextDate: '',
+          activityLog: [],
+        },
+        $unset: {
+          repliedAt: 1,
+        },
+      });
+
+      logger.info({
+        investorId,
+        investorName,
+        draftsDeleted: deletedDraftIds.length,
+        inboxItemsDeleted: inboxDeleteResult.deletedCount,
+      }, 'investor reset to pre-outreach state');
+
+      res.json({
+        status: 'success',
+        investorId,
+        investorName,
+        draftsDeleted: deletedDraftIds,
+        inboxItemsDeleted: inboxDeleteResult.deletedCount,
+      });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      logger.error({ error: errorMsg, investorId }, 'reset-investor-outreach failed');
+      res.status(500).json({ error: errorMsg });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // FIX-REPLIED-AT: One-time fix to unset stale repliedAt field
+  // The findNeedingFollowUp1 query uses { $exists: false } which fails if repliedAt exists
+  // ═══════════════════════════════════════════════════════════════════════════
+  router.post('/fix-replied-at', async (req: Request, res: Response) => {
+    const provided = req.headers['x-trigger-secret'];
+    const expected = process.env['TRIGGER_SECRET'];
+    if (!expected || provided !== expected) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { investorId } = req.body as { investorId?: string };
+    if (!investorId || !Types.ObjectId.isValid(investorId)) {
+      res.status(400).json({ error: 'Invalid investorId' });
+      return;
+    }
+
+    try {
+      const investorObjId = new Types.ObjectId(investorId);
+      const investor = await Investor.findById(investorObjId).exec();
+      if (!investor) {
+        res.status(404).json({ error: 'Investor not found' });
+        return;
+      }
+
+      // Unset repliedAt field so the investor is eligible for follow-up queries
+      await Investor.findByIdAndUpdate(investorObjId, {
+        $unset: { repliedAt: 1 },
+      });
+
+      logger.info({ investorId, investorName: investor.name }, 'unset repliedAt field for follow-up eligibility');
+
+      res.json({
+        status: 'success',
+        investorId,
+        investorName: investor.name,
+        message: 'repliedAt field unset - investor should now be eligible for follow-up queries',
+      });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      logger.error({ error: errorMsg, investorId }, 'fix-replied-at failed');
+      res.status(500).json({ error: errorMsg });
+    }
   });
 
   return router;

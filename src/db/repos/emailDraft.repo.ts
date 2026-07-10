@@ -16,6 +16,9 @@ export interface CreateEmailDraftInput {
   personalizationReasoning?: string;
   qualityScore?: number;
   contactConfidence?: 'verified' | 'inferred' | null;
+  // Test mode fields
+  isTestMode?: boolean;
+  realRecipient?: string;
 }
 
 export const emailDraftRepo = {
@@ -36,6 +39,8 @@ export const emailDraftRepo = {
       personalizationReasoning: input.personalizationReasoning,
       qualityScore: input.qualityScore,
       contactConfidence: input.contactConfidence,
+      isTestMode: input.isTestMode,
+      realRecipient: input.realRecipient,
     });
     return doc.save();
   },

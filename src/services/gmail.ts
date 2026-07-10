@@ -111,6 +111,7 @@ function createRawEmail(to: string, subject: string, body: string, inReplyTo?: s
 export interface CreateDraftResult {
   draftId: string;
   messageId: string | null;
+  threadId: string | null;
   labelApplied: boolean;
 }
 
@@ -137,12 +138,13 @@ export async function createDraft(
 
   const draftId = response.data.id;
   const messageId = response.data.message?.id ?? null;
+  const threadId = response.data.message?.threadId ?? null;
 
   if (!draftId) {
     throw new Error('gmail draft creation returned no draft id');
   }
 
-  logger.info({ draftId, messageId }, 'gmail draft created');
+  logger.info({ draftId, messageId, threadId }, 'gmail draft created');
 
   let labelApplied = false;
 
@@ -187,7 +189,7 @@ export async function createDraft(
     }
   }
 
-  return { draftId, messageId, labelApplied };
+  return { draftId, messageId, threadId, labelApplied };
 }
 
 export function isGmailConfigured(): boolean {

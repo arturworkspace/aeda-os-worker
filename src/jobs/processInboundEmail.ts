@@ -289,7 +289,8 @@ export function defineJob(agenda: Agenda): void {
             await emailDraftRepo.updateGmailInfo(
               budgetDraft._id as Types.ObjectId,
               gmailResult.draftId,
-              gmailResult.messageId
+              gmailResult.messageId,
+              gmailResult.threadId
             );
           } catch (gmailError) {
             logger.error({ error: gmailError }, 'failed to create budget exceeded draft in gmail');
@@ -509,7 +510,8 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
             await emailDraftRepo.updateGmailInfo(
               emailDraftId,
               gmailResult.draftId,
-              gmailResult.messageId
+              gmailResult.messageId,
+              gmailResult.threadId
             );
 
             await emailDraftRepo.setPendingSendLabelApplied(emailDraftId, gmailResult.labelApplied);

@@ -11,8 +11,13 @@ export const investorRepo = {
   async findNeedingFollowUp1(): Promise<IInvestorDocument[]> {
     return Investor.find({
       firstEmailSentAt: { $exists: true, $ne: null },
-      repliedAt: { $exists: false },
-      followUp1SentAt: { $exists: false },
+      hasReply: { $ne: true },
+      $and: [
+        // Check both legacy repliedAt and modern hasReply for backwards compatibility
+        { $or: [{ repliedAt: { $exists: false } }, { repliedAt: null }] },
+        // Accept both non-existent and null (reset sets null, not $unset)
+        { $or: [{ followUp1SentAt: { $exists: false } }, { followUp1SentAt: null }] },
+      ],
     }).exec();
   },
 
@@ -25,8 +30,13 @@ export const investorRepo = {
   async findNeedingFollowUp2(): Promise<IInvestorDocument[]> {
     return Investor.find({
       followUp1SentAt: { $exists: true, $ne: null },
-      repliedAt: { $exists: false },
-      followUp2SentAt: { $exists: false },
+      hasReply: { $ne: true },
+      $and: [
+        // Check both legacy repliedAt and modern hasReply for backwards compatibility
+        { $or: [{ repliedAt: { $exists: false } }, { repliedAt: null }] },
+        // Accept both non-existent and null (reset sets null, not $unset)
+        { $or: [{ followUp2SentAt: { $exists: false } }, { followUp2SentAt: null }] },
+      ],
     }).exec();
   },
 

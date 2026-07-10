@@ -141,7 +141,10 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
     // FOLLOW-UP 1: investors needing first follow-up
     // ═══════════════════════════════════════════════════════════════════
     const needingFollowUp1 = await investorRepo.findNeedingFollowUp1();
-    logger.info({ count: needingFollowUp1.length }, 'investors checked for follow-up 1');
+    logger.info({
+      count: needingFollowUp1.length,
+      investors: needingFollowUp1.map(i => ({ id: i._id, name: i.name, firstEmailSentAt: i.firstEmailSentAt })),
+    }, 'investors checked for follow-up 1');
 
     for (const investor of needingFollowUp1) {
       if (!investor.firstEmailSentAt) continue;
@@ -195,8 +198,12 @@ Rules:
 - Reference the initial email naturally (you have it above for context)
 - Add one small new data point if possible
 - Professional but warm
-- No signature needed
 - If the contact's first name is not known or not provided, use a generic greeting like "Hi," or "Hi there," — NEVER output a bracketed placeholder token like "[First Name]" or similar in the final email text
+- End with signature block (blank line before it):
+
+Best Regards
+Julia Maklakova
+Fundraising manager
 
 Return JSON: {"subject": "Re: ...", "body": "..."}`,
             },
@@ -417,8 +424,12 @@ Rules:
 - This is a final check-in, respect their time
 - Offer to close the loop if not a fit (this is intentionally different from the first-email CTA — it's a graceful exit)
 - Professional and gracious
-- No signature needed
 - If the contact's first name is not known or not provided, use a generic greeting like "Hi," or "Hi there," — NEVER output a bracketed placeholder token like "[First Name]" or similar in the final email text
+- End with signature block (blank line before it):
+
+Best Regards
+Julia Maklakova
+Fundraising manager
 
 Return JSON: {"subject": "Re: ...", "body": "..."}`,
             },

@@ -111,6 +111,13 @@ export interface JuliaCreateDraftOptions {
   inReplyToMessageId?: string | undefined;
 }
 
+// Forbidden placeholders that must be filled in before sending
+const FORBIDDEN_PLACEHOLDERS = [
+  '[PENDING FINANCIAL UPDATE]',
+  '[First Name]',
+  '[FIRST NAME]',
+];
+
 export async function juliaCreateDraft(
   to: string,
   subject: string,
@@ -119,6 +126,21 @@ export async function juliaCreateDraft(
 ): Promise<JuliaCreateDraftResult> {
   if (!juliaGmailClient || !juliaOauth2Client) {
     throw new Error('julia gmail client not initialized');
+  }
+
+  // Pre-send validation: block drafts with unfilled placeholders
+  for (const placeholder of FORBIDDEN_PLACEHOLDERS) {
+    if (body.includes(placeholder) || subject.includes(placeholder)) {
+      logger.warn({
+        placeholder,
+        to,
+        subjectPreview: subject.slice(0, 50),
+      }, 'BLOCKED: email contains unfilled placeholder');
+      throw new Error(
+        `BLOCKED: Email contains unfilled placeholder "${placeholder}". ` +
+        `This must be filled in by a human before the email can be pushed to Gmail.`
+      );
+    }
   }
 
   await refreshJuliaAccessToken();
@@ -270,6 +292,46 @@ function getHeader(headers: MessageHeader[] | null | undefined, name: string): s
  * a scheduled job to check if investors have replied to Julia's outreach emails.
  * NOT YET WIRED TO A JOB — just the callable function.
  */
+/**
+ * Search Julia's Gmail for threads matching a query.
+ * Useful for finding threads by subject, sender, etc.
+ */
+export async function searchThreads(query: string, maxResults = 10): Promise<Array<{ threadId: string; snippet: string; messageCount?: number }>> {
+  if (!juliaGmailClient || !juliaOauth2Client) {
+    logger.warn('julia gmail client not initialized, cannot search threads');
+    return [];
+  }
+
+  try {
+    await refreshJuliaAccessToken();
+
+    const response = await juliaGmailClient.users.threads.list({
+      userId: 'me',
+      q: query,
+      maxResults,
+    });
+
+    const threads = response.data.threads ?? [];
+    const results: Array<{ threadId: string; snippet: string; messageCount?: number }> = [];
+
+    for (const thread of threads) {
+      if (thread.id) {
+        results.push({
+          threadId: thread.id,
+          snippet: thread.snippet ?? '',
+        });
+      }
+    }
+
+    logger.info({ query, resultCount: results.length }, 'julia gmail thread search completed');
+    return results;
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errMsg, query }, 'failed to search julia gmail threads');
+    return [];
+  }
+}
+
 export async function getThreadById(threadId: string): Promise<JuliaThread | null> {
   if (!juliaGmailClient || !juliaOauth2Client) {
     logger.warn('julia gmail client not initialized, cannot fetch thread');

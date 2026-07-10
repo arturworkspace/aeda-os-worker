@@ -28,6 +28,9 @@ export interface IEmailDraft {
   personalizationReasoning?: string;
   qualityScore?: number;
   contactConfidence?: 'verified' | 'inferred' | null;
+  // Test mode fields
+  isTestMode?: boolean;
+  realRecipient?: string;
 }
 
 export type IEmailDraftDocument = mongoose.HydratedDocument<IEmailDraft>;
@@ -58,6 +61,9 @@ const emailDraftSchema = new Schema<IEmailDraft>(
     personalizationReasoning: { type: String, required: false },
     qualityScore: { type: Number, required: false },
     contactConfidence: { type: String, enum: ['verified', 'inferred', null], required: false },
+    // Test mode fields
+    isTestMode: { type: Boolean, default: false },
+    realRecipient: { type: String, required: false },
   },
   {
     collection: 'os_email_drafts',

@@ -103,29 +103,7 @@ export async function runGmailSendStatusSync(): Promise<GmailSendStatusSyncResul
     // ═══════════════════════════════════════════════════════════════════
     const pendingDrafts = await emailDraftRepo.findPendingSendStatus();
 
-    // Debug: log all draft IDs and their investor IDs for tracing
-    const draftSummary = pendingDrafts.map(d => ({
-      draftId: d._id.toString(),
-      investorId: d.investorId?.toString() || 'none',
-      gmailDraftId: d.gmail_draft_id || 'none',
-      status: d.status,
-      draftType: d.draftType || 'unknown',
-    }));
-    logger.info({ count: pendingDrafts.length, drafts: draftSummary }, 'checking gmail send status for drafts');
-
-    // Debug: specifically check if HongShan's draft exists with any status
-    const HONGSHAN_INVESTOR_ID = '6a4d659b6200b6e472d938c8';
-    const hongShanDrafts = await emailDraftRepo.find({ investorId: new Types.ObjectId(HONGSHAN_INVESTOR_ID) });
-    logger.info({
-      hongShanDraftCount: hongShanDrafts.length,
-      hongShanDrafts: hongShanDrafts.map(d => ({
-        draftId: d._id.toString(),
-        status: d.status,
-        gmailDraftId: d.gmail_draft_id || 'MISSING',
-        gmailThreadId: d.gmail_thread_id || 'MISSING',
-        draftType: d.draftType || 'MISSING',
-      })),
-    }, 'DEBUG: HongShan draft lookup');
+    logger.info({ count: pendingDrafts.length }, 'checking gmail send status for drafts');
 
     for (const draft of pendingDrafts) {
       checkedCount++;
@@ -135,11 +113,59 @@ export async function runGmailSendStatusSync(): Promise<GmailSendStatusSyncResul
       }
 
       try {
-        await gmailClient.users.drafts.get({
+        const draftCheckResponse = await gmailClient.users.drafts.get({
           userId: 'me',
           id: draft.gmail_draft_id,
         });
-        logger.debug({ draftId: draft.gmail_draft_id, investorId: draft.investorId }, 'draft still exists in gmail');
+
+        // Gmail keeps draft metadata even after sending - check if MESSAGE has SENT label
+        const messageId = draftCheckResponse.data.message?.id;
+        if (messageId) {
+          try {
+            const messageResponse = await gmailClient.users.messages.get({
+              userId: 'me',
+              id: messageId,
+              format: 'metadata',
+            });
+            const labels = messageResponse.data.labelIds || [];
+            const isDraft = labels.includes('DRAFT');
+            const isSent = labels.includes('SENT');
+
+            if (!isDraft && isSent) {
+              logger.info({
+                draftId: draft._id.toString(),
+                gmailDraftId: draft.gmail_draft_id,
+                investorId: draft.investorId,
+              }, 'draft message has SENT label - marking as sent');
+
+              let sentAt: Date | null = null;
+              if (messageResponse.data.internalDate) {
+                sentAt = new Date(parseInt(messageResponse.data.internalDate, 10));
+              }
+
+              await emailDraftRepo.markAsSent(draft._id, sentAt || new Date());
+              updatedCount++;
+
+              if (draft.investorId && draft.draftType === 'first_email') {
+                const investor = await investorRepo.findById(draft.investorId);
+                if (investor && !investor.firstEmailSentAt) {
+                  await Investor.findByIdAndUpdate(draft.investorId, {
+                    firstEmailSentAt: sentAt || new Date(),
+                    $push: { activityLog: { action: 'first_email_sent_auto', at: new Date() } },
+                  });
+                  logger.info({ investorId: draft.investorId }, 'set firstEmailSentAt on investor');
+                }
+              }
+              continue;
+            }
+          } catch (msgErr) {
+            logger.warn({
+              draftId: draft._id.toString(),
+              messageId,
+              error: msgErr instanceof Error ? msgErr.message : String(msgErr),
+            }, 'failed to check message labels');
+          }
+        }
       } catch (error: unknown) {
         const err = error as { code?: number; message?: string };
 
