@@ -161,14 +161,26 @@ export async function runGmailSendStatusSync(): Promise<GmailSendStatusSyncResul
     logger.info({ count: investorsAwaitingReply.length }, 'checking for investor replies');
 
     for (const investor of investorsAwaitingReply) {
-      // Find the latest sent draft for this investor to get the thread ID
-      const drafts = await emailDraftRepo.find({
+      // Find drafts for this investor with gmail_thread_id (any status first for debugging)
+      const allDrafts = await emailDraftRepo.find({
         investorId: investor._id,
         gmail_thread_id: { $exists: true, $ne: null },
-        status: 'sent',
       });
 
-      if (drafts.length === 0) continue;
+      logger.info({
+        investorId: investor._id,
+        investorName: investor.name,
+        totalDrafts: allDrafts.length,
+        draftStatuses: allDrafts.map(d => ({ id: d._id, status: d.status, threadId: d.gmail_thread_id })),
+      }, 'checking investor for reply detection');
+
+      // Filter to only sent drafts for reply checking
+      const drafts = allDrafts.filter(d => d.status === 'sent');
+
+      if (drafts.length === 0) {
+        logger.info({ investorId: investor._id, investorName: investor.name }, 'no sent drafts found, skipping reply check');
+        continue;
+      }
 
       // Get the thread ID from the most recent sent draft
       const latestDraft = drafts[0];
