@@ -1,6 +1,6 @@
 import mongoose, { Schema, Types } from 'mongoose';
 
-export const PROCESSING_STATUSES = ['received', 'processing', 'draft_created', 'error'] as const;
+export const PROCESSING_STATUSES = ['received', 'processing', 'draft_created', 'error', 'blocked'] as const;
 export type ProcessingStatus = (typeof PROCESSING_STATUSES)[number];
 
 export interface ICrmMatch {
