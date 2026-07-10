@@ -22,6 +22,32 @@ export function initJuliaGmailClient(): void {
 
   juliaGmailClient = google.gmail({ version: 'v1', auth: client });
 
+  // ============================================================================
+  // SECURITY GUARD: Block Gmail send capability
+  // ============================================================================
+  // The gmail.compose OAuth scope (which Julia's token has) inherently includes
+  // send capability — there is no narrower "draft-only" scope in Gmail's API.
+  // Our integration is designed to be compose+read-only: we create drafts for
+  // human review, never send programmatically.
+  //
+  // This guard ensures that even if future code accidentally calls send(), it
+  // fails immediately rather than sending email. Removing this guard requires
+  // deliberate action and should trigger a security review.
+  //
+  // Finding source: Security test 2026-07-10, confirmed gmail.compose includes
+
+  // send capability via live test against Julia's OAuth token.
+  // ============================================================================
+  const originalSend = juliaGmailClient.users.messages.send;
+  juliaGmailClient.users.messages.send = (() => {
+    throw new Error(
+      'BLOCKED: Julia\'s Gmail integration is compose+read-only by design. ' +
+      'Sending is not permitted. This guard exists because gmail.compose scope ' +
+      'inherently includes send capability. Review security implications before ' +
+      'removing this guard.'
+    );
+  }) as typeof originalSend;
+
   logger.info('julia gmail client initialized (julia@aedawallet.com)');
 }
 
