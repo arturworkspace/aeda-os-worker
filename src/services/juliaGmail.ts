@@ -406,7 +406,7 @@ export async function juliaSendDraft(
       requestBody: {
         message: {
           raw,
-          threadId: message.threadId ?? undefined,
+          threadId: message.threadId ?? null,
         },
       },
     });

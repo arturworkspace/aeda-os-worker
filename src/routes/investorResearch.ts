@@ -2080,7 +2080,7 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
 
       // Update the draft record to reflect it was sent
       matchingDraft.status = 'sent';
-      matchingDraft.gmail_sent_message_id = sendResult.messageId;
+      matchingDraft.sent_at = new Date();
       await matchingDraft.save();
 
       logger.info({
@@ -2095,9 +2095,10 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
       await writeAuditEvent({
         actor: 'system',
         actorType: 'system',
-        eventType: 'investor.draft_sent_via_api',
+        eventType: 'job.run',
         subjectId: investorObjId,
         payload: {
+          jobName: 'redirect-and-send-draft',
           investorId,
           investorName: investor.name,
           draftGmailId,
