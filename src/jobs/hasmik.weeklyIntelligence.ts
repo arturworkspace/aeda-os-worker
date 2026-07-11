@@ -11,6 +11,9 @@ import {
 } from '../lib/hasmikTools.js';
 import { getDb } from '../lib/db.js';
 import { logger } from '../logger.js';
+import { writeAuditEvent } from '../core/auditLog.js';
+import { costLedgerRepo } from '../db/repos/costLedger.repo.js';
+import { estimateCostUsd } from '../config/pricing.js';
 
 const JOB_NAME = 'hasmik.weeklyIntelligence';
 
@@ -444,16 +447,20 @@ function buildTools() {
 
 export async function runHasmikIntelligence(): Promise<void> {
   const db = await getDb();
-  const auditLog = db.collection('os_audit_log');
   const jobStartTime = new Date();
   const startMs = Date.now();
 
-  await auditLog.insertOne({
-    agentId: 'hasmik',
-    jobName: JOB_NAME,
-    action: 'job_start',
-    createdAt: jobStartTime,
-  });
+  // Log job start using proper audit event format
+  try {
+    await writeAuditEvent({
+      actor: 'hasmik',
+      actorType: 'agent',
+      eventType: 'job.run',
+      payload: { jobName: JOB_NAME, action: 'job_start' },
+    });
+  } catch (err) {
+    logger.error({ error: (err as Error).message, stack: (err as Error).stack }, '[hasmik] failed to write job_start audit event');
+  }
 
   try {
     const result = await runAgentLoop({
@@ -476,89 +483,119 @@ export async function runHasmikIntelligence(): Promise<void> {
     });
 
     const verification = await runVerificationPass(jobStartTime);
-
     const durationMs = Date.now() - startMs;
 
-    const estimatedCostUsd = (
-      (result.inputTokens / 1_000_000) * 3.0 +
-      (result.outputTokens / 1_000_000) * 15.0
-    );
-
-    await db.collection('os_cost_ledger').insertOne({
-      agentId: 'hasmik',
-      jobName: JOB_NAME,
-      model: 'claude-sonnet-4-6',
-      inputTokens: result.inputTokens,
-      outputTokens: result.outputTokens,
-      estimatedCostUsd,
-      iterations: result.iterations,
-      toolCallCount: result.toolCallCount,
-      verificationResults: verification,
-      durationMs,
-      contextManagement: {
-        enabled: true,
-        editsApplied: result.contextEditsApplied ?? [],
-        tokensSavedByEdits: result.tokensSavedByEdits ?? 0,
-      },
-      promptCaching: {
-        enabled: true,
-        cacheCreationTokens: result.cacheCreationTokens ?? 0,
-        cacheReadTokens: result.cacheReadTokens ?? 0,
-      },
-      createdAt: new Date(),
+    // Calculate cost using the proper estimator
+    const costUsd = estimateCostUsd('claude-sonnet-4-6', {
+      input_tokens: result.inputTokens,
+      output_tokens: result.outputTokens,
+      cache_creation_input_tokens: result.cacheCreationTokens,
+      cache_read_input_tokens: result.cacheReadTokens,
     });
 
-    await auditLog.insertOne({
-      agentId: 'hasmik',
-      jobName: JOB_NAME,
-      action: 'job_complete',
-      iterations: result.iterations,
-      toolCallCount: result.toolCallCount,
-      inputTokens: result.inputTokens,
-      outputTokens: result.outputTokens,
-      estimatedCostUsd,
-      verificationResults: verification,
-      durationMs,
-      contextManagement: {
-        editsApplied: result.contextEditsApplied ?? [],
-        tokensSavedByEdits: result.tokensSavedByEdits ?? 0,
-      },
-      promptCaching: {
-        cacheCreationTokens: result.cacheCreationTokens ?? 0,
-        cacheReadTokens: result.cacheReadTokens ?? 0,
-      },
-      summary: result.finalResponse.slice(0, 500),
-      createdAt: new Date(),
-    });
+    // POST-LOOP WRITE 1: Cost ledger (using repo for correct schema)
+    try {
+      await costLedgerRepo.insert({
+        agentOrJob: JOB_NAME,
+        packageId: null,
+        projectKey: null,
+        llmModel: 'claude-sonnet-4-6',
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        costUsd,
+        estimatedMaxUsd: costUsd * 1.5,
+        tier: 'production',
+      });
+      logger.info({ costUsd, inputTokens: result.inputTokens, outputTokens: result.outputTokens }, '[hasmik] cost_ledger written');
+    } catch (err) {
+      logger.error({ error: (err as Error).message, stack: (err as Error).stack }, '[hasmik] FAILED to write cost_ledger');
+      // Fallback: try to write error to audit log so failure is visible
+      try {
+        await writeAuditEvent({
+          actor: 'hasmik',
+          actorType: 'agent',
+          eventType: 'job.run',
+          payload: { jobName: JOB_NAME, action: 'cost_ledger_write_failed', error: (err as Error).message },
+        });
+      } catch { /* ignore fallback failure */ }
+    }
 
-    await db.collection('os_inbox_items').insertOne({
-      recipient: 'artur',
-      sender_email: 'hasmik@aeda.internal',
-      sender_name: '@hasmik (Research Agent)',
-      subject: `Intelligence Brief — ${new Date().toLocaleDateString('en-GB', {
-        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
-      })}`,
-      body_text: result.finalResponse,
-      body_sanitized: result.finalResponse,
-      agent_commentary: `Weekly intelligence run: ${result.iterations} iterations, ${result.toolCallCount} tool calls, ~$${estimatedCostUsd.toFixed(3)}. Verification: ${verification.verified} confirmed, ${verification.contradicted} contradicted, ${verification.pending} pending.`,
-      message_id: `hasmik-weekly-${Date.now()}`,
-      received_at: new Date(),
-      processing_status: 'draft_created',
-      routing: {
-        artur_classification: 'weekly-clevel-brief',
-        routed_to_agent: 'artur',
-        artur_brief: 'Weekly board brief from @hasmik — review top signals and recommended actions.',
-        lilit_task_id: null,
-      },
-      crm_match: { matched: false, investor_id: null, investor_name: null, matched_on: null },
-      createdAt: new Date(),
-    });
+    // POST-LOOP WRITE 2: Audit log (using writeAuditEvent for correct schema)
+    try {
+      await writeAuditEvent({
+        actor: 'hasmik',
+        actorType: 'agent',
+        eventType: 'job.run',
+        costUsd,
+        payload: {
+          jobName: JOB_NAME,
+          action: 'job_complete',
+          iterations: result.iterations,
+          toolCallCount: result.toolCallCount,
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+          costUsd,
+          durationMs,
+          verificationResults: verification,
+          contextManagement: {
+            editsApplied: result.contextEditsApplied?.length ?? 0,
+            tokensSavedByEdits: result.tokensSavedByEdits ?? 0,
+          },
+          promptCaching: {
+            cacheCreationTokens: result.cacheCreationTokens ?? 0,
+            cacheReadTokens: result.cacheReadTokens ?? 0,
+          },
+          summary: result.finalResponse.slice(0, 500),
+        },
+      });
+      logger.info('[hasmik] audit_log written');
+    } catch (err) {
+      logger.error({ error: (err as Error).message, stack: (err as Error).stack }, '[hasmik] FAILED to write audit_log');
+    }
+
+    // POST-LOOP WRITE 3: Inbox item (weekly briefing)
+    try {
+      await db.collection('os_inbox_items').insertOne({
+        recipient: 'artur',
+        sender_email: 'hasmik@aeda.internal',
+        sender_name: '@hasmik (Research Agent)',
+        subject: `Intelligence Brief — ${new Date().toLocaleDateString('en-GB', {
+          weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+        })}`,
+        body_text: result.finalResponse,
+        body_sanitized: result.finalResponse,
+        agent_commentary: `Weekly intelligence run: ${result.iterations} iterations, ${result.toolCallCount} tool calls, ~$${costUsd.toFixed(3)}. Verification: ${verification.verified} confirmed, ${verification.contradicted} contradicted, ${verification.pending} pending. Context edits saved ~${result.tokensSavedByEdits ?? 0} tokens. Cache: ${result.cacheReadTokens ?? 0} read, ${result.cacheCreationTokens ?? 0} created.`,
+        message_id: `hasmik-weekly-${Date.now()}`,
+        received_at: new Date(),
+        processing_status: 'draft_created',
+        routing: {
+          artur_classification: 'weekly-clevel-brief',
+          routed_to_agent: 'artur',
+          artur_brief: 'Weekly board brief from @hasmik — review top signals and recommended actions.',
+          lilit_task_id: null,
+        },
+        crm_match: { matched: false, investor_id: null, investor_name: null, matched_on: null },
+        createdAt: new Date(),
+      });
+      logger.info('[hasmik] inbox_item written');
+    } catch (err) {
+      logger.error({ error: (err as Error).message, stack: (err as Error).stack }, '[hasmik] FAILED to write inbox_item');
+      // Fallback: try to write error to audit log
+      try {
+        await writeAuditEvent({
+          actor: 'hasmik',
+          actorType: 'agent',
+          eventType: 'job.run',
+          payload: { jobName: JOB_NAME, action: 'inbox_write_failed', error: (err as Error).message },
+        });
+      } catch { /* ignore fallback failure */ }
+    }
 
     logger.info(
       {
         iterations: result.iterations,
         toolCallCount: result.toolCallCount,
-        estimatedCostUsd,
+        costUsd,
         verification,
         contextManagement: {
           editsApplied: result.contextEditsApplied?.length ?? 0,
@@ -573,14 +610,26 @@ export async function runHasmikIntelligence(): Promise<void> {
     );
 
   } catch (err) {
-    await auditLog.insertOne({
-      agentId: 'hasmik',
-      jobName: JOB_NAME,
-      action: 'job_error',
-      error: (err as Error).message,
-      durationMs: Date.now() - startMs,
-      createdAt: new Date(),
-    });
+    const errorMsg = (err as Error).message;
+    const errorStack = (err as Error).stack;
+    logger.error({ error: errorMsg, stack: errorStack, durationMs: Date.now() - startMs }, '[hasmik] job failed');
+
+    // Try to write error to audit log
+    try {
+      await writeAuditEvent({
+        actor: 'hasmik',
+        actorType: 'agent',
+        eventType: 'job.run',
+        payload: {
+          jobName: JOB_NAME,
+          action: 'job_error',
+          error: errorMsg,
+          durationMs: Date.now() - startMs,
+        },
+      });
+    } catch (auditErr) {
+      logger.error({ error: (auditErr as Error).message }, '[hasmik] FAILED to write error audit event');
+    }
     throw err;
   }
 }
