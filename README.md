@@ -145,6 +145,26 @@ npm run build
 npm run typecheck
 ```
 
+## hasmik weekly intelligence job
+
+the `hasmik.weeklyIntelligence` job runs Monday 19:00 Prague. it researches domains and writes entries to the `knowledges` collection.
+
+### agentScope array pattern
+
+`agentScope` accepts `string | string[]`. when multiple agents need the same professional entry (e.g., @narek and @cnb both need regulation intel), use the array pattern:
+
+```typescript
+agentScope: ['narek', 'cnb']  // both agents receive the entry
+```
+
+this avoids duplicate research passes. the entry is written once with:
+- `targetAgent`: first element (`narek`)
+- `relevantAgents`: full array (`['narek', 'cnb']`)
+
+the Tier 3 query in `getKnowledgeFeed` checks both fields, so secondary agents also receive shared entries.
+
+**when to use**: any time a new Phase 2 agent shares a domain with an existing agent. add them to the array, don't duplicate the research prompt.
+
 ## model tiers
 
 | tier | primary model | fallback |

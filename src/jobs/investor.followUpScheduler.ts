@@ -3,6 +3,7 @@ import { Types } from 'mongoose';
 import { investorRepo } from '../db/repos/investor.repo.js';
 import { emailDraftRepo } from '../db/repos/emailDraft.repo.js';
 import { InboxItem } from '../db/schemas/inboxItem.js';
+import { OsSettings } from '../db/schemas/osSettings.js';
 import { businessDaysBetween } from '../lib/dates.js';
 import { routedCall, getTextContent } from '../core/modelRouter.js';
 import { writeAuditEvent } from '../core/auditLog.js';
@@ -130,6 +131,21 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
   }
 
   try {
+    // Check global outreach pause flag
+    const globalSettings = await OsSettings.findOne({ key: 'global' }).lean();
+    if (globalSettings?.outreachPaused) {
+      logger.info({
+        pausedBy: globalSettings.outreachPausedBy,
+        pausedAt: globalSettings.outreachPausedAt,
+      }, 'follow-up scheduler skipped - global outreach is PAUSED');
+      return {
+        success: true,
+        draftsCreated: 0,
+        totalCostUsd: 0,
+        durationMs: Date.now() - startTime,
+      };
+    }
+
     const julia = getPersona('julia');
     if (!julia) {
       throw new Error('julia persona not found');
@@ -152,6 +168,12 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
       // Round 4: Stop cadence permanently if investor has replied
       if (investor.hasReply) {
         logger.info({ investorId: investor._id, name: investor.name }, 'skipping follow-up 1 - investor has replied');
+        continue;
+      }
+
+      // Check per-investor pause flag
+      if (investor.outreachPaused) {
+        logger.info({ investorId: investor._id, name: investor.name }, 'skipping follow-up 1 - investor outreach is PAUSED');
         continue;
       }
 
@@ -372,6 +394,12 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
         // Round 4: Stop cadence permanently if investor has replied
         if (investor.hasReply) {
           logger.info({ investorId: investor._id, name: investor.name }, 'skipping follow-up 2 - investor has replied');
+          continue;
+        }
+
+        // Check per-investor pause flag
+        if (investor.outreachPaused) {
+          logger.info({ investorId: investor._id, name: investor.name }, 'skipping follow-up 2 - investor outreach is PAUSED');
           continue;
         }
 

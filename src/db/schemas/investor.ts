@@ -44,6 +44,9 @@ export interface IInvestor {
   activityLog?: IActivityLogEntry[];
   threadMessages?: IThreadMessage[];
   threadSyncedAt?: Date;
+  outreachPaused?: boolean;
+  outreachPausedAt?: Date;
+  outreachPausedBy?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -109,6 +112,9 @@ const investorSchema = new Schema<IInvestor>(
     activityLog: { type: [activityLogSchema], default: [] },
     threadMessages: { type: [threadMessageSchema], default: [] },
     threadSyncedAt: { type: Date, required: false },
+    outreachPaused: { type: Boolean, default: false },
+    outreachPausedAt: { type: Date, required: false },
+    outreachPausedBy: { type: String, required: false },
   },
   {
     collection: 'investors',
