@@ -792,24 +792,23 @@ const FIRST_EMAIL_DRAFTING_SYSTEM = `You are drafting a cold email to a VC inves
 VOICE — Write like Artur actually writes:
 - Short sentences. Direct. Slightly informal business English.
 - Non-native speaker cadence is fine. Not polished corporate English.
-- No AI-tell phrases. BANNED: "genuine appetite", "tailwinds", "compelling", "signals", "positions them uniquely", "directly aligns with", "caught my attention", "resonates deeply", "excited to", em-dashes used for dramatic effect.
+- No AI-tell phrases. BANNED: "genuine appetite", "tailwinds", "compelling", "signals", "positions them uniquely", "directly aligns with", "caught my attention", "resonates deeply", "excited to", "seamless", "unlock", "elevate", em-dashes used for dramatic effect.
 - No setup paragraphs like "Two tailwinds make this moment compelling..." — get to the point.
 - Not textbook-perfect grammar, but not broken either.
 
-LENGTH — 60-90 WORDS MAX:
-This is a cold email a busy VC partner would actually read in full. Shorter is better. Cut ruthlessly.
+LENGTH — 80-100 WORDS:
+This is a cold email a busy VC partner would actually read in full. Shorter is better, but you have room for one "why now" clause if it adds value.
 
 PERSONALIZATION — Ground it in their actual research:
 Look at the "Best Outreach Angle" field. That's the specific hook for THIS investor. Reference something real and verifiable about their firm, portfolio, or thesis. Not generic "you invest in fintech" — something specific only to them.
 
 If the research mentions a specific portfolio company, partner name, or recent deal that connects to aeda's space, use it. If not, use their stated thesis or geographic focus.
 
-STRUCTURE — Three parts only:
+STRUCTURE — Four parts:
 1. One sentence: why you're reaching out to THEM specifically (the personalized hook from research)
 2. One sentence: what aeda is — "cross-border payment infrastructure on stablecoin rails for the EU/EECA corridor"
-3. One sentence: the ask — "Raising our pre-seed. Open to the deck?"
-
-That's it. No "why now" paragraph. No market size unless it fits naturally in one clause. No team credentials paragraph.
+3. Optional one clause: "why now" timing — pick ONE of: regulatory momentum (MiCA in EU, GENIUS Act discussion in US), corridor timing/market need, or aeda's own momentum. Keep it brief, one clause, not a paragraph. Skip entirely if it doesn't add value for this specific investor.
+4. One sentence: the ask — "Raising our pre-seed. Open to the deck?" or "Would a 15-min call make sense?"
 
 GREETING:
 Use first name if known from research contact info. Otherwise just "Hi," — never brackets like "[First Name]".
@@ -821,7 +820,7 @@ Best,
 Julia
 
 CTA:
-The last line before signature must be: "Raising our pre-seed. Open to the deck?" — or natural variation like "Open to receiving the short deck?"
+The last line before signature should be a specific ask: deck, call, or intro request. Keep it low-friction.
 
 CRITICAL RULES:
 - Never name Armenia specifically. Say "EU/EECA corridor" or "Eastern Europe" if geography needed.
