@@ -793,7 +793,7 @@ VOICE — Write like Artur actually writes:
 - Short sentences. Direct. Slightly informal business English.
 - Non-native speaker cadence is fine. Not polished corporate English.
 - No AI-tell phrases. BANNED: "genuine appetite", "tailwinds", "compelling", "signals", "positions them uniquely", "directly aligns with", "resonates deeply", "excited to", "seamless", "unlock", "elevate", em-dashes used for dramatic effect.
-- No reaction-framing openers. BANNED: "caught my eye", "caught my attention", "I was impressed by", "I came across", "I noticed you/your", "your [X] caught my [eye/attention]" and all variants. These are AI-tell clichés.
+- No recipient-flattery openers. The entire pattern of "Your [work/investment/thesis] on X [caught my eye/impressed me/etc.]" is forbidden — any wording that frames the opener as your personal reaction to the recipient's work. Open with facts, not flattery.
 - No setup paragraphs like "Two tailwinds make this moment compelling..." — get to the point.
 - Not textbook-perfect grammar, but not broken either.
 
@@ -808,11 +808,18 @@ Look at the "Best Outreach Angle" field. That's the specific hook for THIS inves
 
 If the research mentions a specific portfolio company, partner name, or recent deal that connects to aeda's space, use it. If not, use their stated thesis or geographic focus.
 
-STRUCTURE — Four parts:
-1. One sentence: why you're reaching out to THEM specifically. State a specific fact about their firm/portfolio as a direct observation, NOT framed as your personal reaction. GOOD: "a16z crypto led LayerZero's $75M round — cross-chain connectivity and cross-border payments feel like the same infrastructure problem." BAD: "Your work on LayerZero caught my eye." State the fact plainly, then connect it to aeda.
-2. One sentence: what aeda is — "cross-border payment infrastructure on stablecoin rails for the EU/EECA corridor"
-3. Optional one clause: "why now" timing — pick ONE of: regulatory momentum (MiCA in EU, GENIUS Act discussion in US), corridor timing/market need, or aeda's own momentum. Keep it brief, one clause, not a paragraph. Skip entirely if it doesn't add value for this specific investor.
-4. One sentence: the ask — "Raising our pre-seed. Open to the deck?" or "Would a 15-min call make sense?"
+STRUCTURE — Four parts (fact-first, no recipient flattery):
+
+1. OPENER — Direct factual statement, NOT personal reaction to recipient's work.
+   FORBIDDEN PATTERN: "Your work on X..." / "Your investment in X..." / "I was impressed by your..." / Any framing where you describe YOUR reaction to THEIR work. This entire pattern is out, regardless of exact wording.
+   ALLOWED: Either (a) a direct factual observation about their portfolio stated as fact ("a16z crypto led LayerZero's $75M round — cross-chain and cross-border are the same infra problem"), or (b) open with the problem aeda solves stated plainly.
+   The opener should state facts, then connect to aeda. No throat-clearing, no flattery setup.
+
+2. WHAT AEDA IS — One concrete sentence: "aeda is building cross-border payment infrastructure on stablecoin rails for the EU/EECA corridor." No metaphors-as-openers, no abstractions.
+
+3. WHY NOW — One clause or sentence: the regulatory/market timing point (MiCA live in EU, corridor underserved, etc.) stated as fact. Skip if it doesn't add value for this specific investor.
+
+4. THE ASK — "We're raising our pre-seed. Open to the deck?" or similar low-friction CTA.
 
 GREETING:
 Use first name if known from research contact info. Otherwise just "Hi," — never brackets like "[First Name]".
