@@ -279,9 +279,13 @@ agentScope set to the agent's ID for these entries.
 For EACH agent below, research their professional domain and
 write 1-3 entries with agentScope: '<agent-id>':
 
-ham (CEO):
+artur (CEO):
   → Startup CEO best practices, founder mental health, leadership
   → EU fintech founder stories, CEO compensation benchmarks
+
+hamazasp (CTO):
+  → Backend infrastructure, NestJS, Railway, Vercel updates
+  → Solana ecosystem, blockchain development best practices
 
 narek (Legal & Compliance):
   → MiCA implementation updates, AML/KYC guidance, GDPR changes
