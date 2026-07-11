@@ -465,6 +465,13 @@ export async function runHasmikIntelligence(): Promise<void> {
       jobName: JOB_NAME,
       builtInTools: [{ type: 'web_search_20250305', name: 'web_search' }],
       customTools: buildTools(),
+      contextManagement: {
+        edits: [{
+          type: 'clear_tool_uses_20250919',
+          trigger: { type: 'input_tokens', value: 30000 },
+          keep: { type: 'tool_uses', value: 5 },
+        }],
+      },
     });
 
     const verification = await runVerificationPass(jobStartTime);
@@ -487,6 +494,11 @@ export async function runHasmikIntelligence(): Promise<void> {
       toolCallCount: result.toolCallCount,
       verificationResults: verification,
       durationMs,
+      contextManagement: {
+        enabled: true,
+        editsApplied: result.contextEditsApplied ?? [],
+        tokensSavedByEdits: result.tokensSavedByEdits ?? 0,
+      },
       createdAt: new Date(),
     });
 
@@ -501,6 +513,10 @@ export async function runHasmikIntelligence(): Promise<void> {
       estimatedCostUsd,
       verificationResults: verification,
       durationMs,
+      contextManagement: {
+        editsApplied: result.contextEditsApplied ?? [],
+        tokensSavedByEdits: result.tokensSavedByEdits ?? 0,
+      },
       summary: result.finalResponse.slice(0, 500),
       createdAt: new Date(),
     });
@@ -534,6 +550,10 @@ export async function runHasmikIntelligence(): Promise<void> {
         toolCallCount: result.toolCallCount,
         estimatedCostUsd,
         verification,
+        contextManagement: {
+          editsApplied: result.contextEditsApplied?.length ?? 0,
+          tokensSavedByEdits: result.tokensSavedByEdits ?? 0,
+        },
       },
       `@hasmik complete`
     );

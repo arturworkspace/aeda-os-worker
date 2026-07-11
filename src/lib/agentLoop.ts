@@ -14,6 +14,15 @@ export interface LoopTool {
   handler: (input: Record<string, unknown>) => Promise<unknown>;
 }
 
+export interface ContextManagementEdit {
+  type: 'clear_tool_uses_20250919';
+  trigger?: { type: 'input_tokens' | 'tool_uses'; value: number };
+  keep?: { type: 'tool_uses'; value: number };
+  clear_at_least?: { type: 'input_tokens'; value: number };
+  exclude_tools?: string[];
+  clear_tool_inputs?: boolean;
+}
+
 export interface LoopConfig {
   model: string;
   systemPrompt: string;
@@ -23,6 +32,15 @@ export interface LoopConfig {
   maxIterations?: number;
   agentId: string;
   jobName: string;
+  contextManagement?: {
+    edits: ContextManagementEdit[];
+  };
+}
+
+export interface ContextEditStats {
+  type: string;
+  cleared_tool_uses?: number;
+  cleared_input_tokens?: number;
 }
 
 export interface LoopResult {
@@ -31,11 +49,14 @@ export interface LoopResult {
   toolCallCount: number;
   inputTokens: number;
   outputTokens: number;
+  contextEditsApplied?: ContextEditStats[];
+  tokensSavedByEdits?: number;
 }
 
 export async function runAgentLoop(config: LoopConfig): Promise<LoopResult> {
   const client = new Anthropic();
   const maxIterations = config.maxIterations ?? 30;
+  const useContextManagement = !!config.contextManagement?.edits?.length;
 
   const allTools = [
     ...(config.builtInTools ?? []),
@@ -56,6 +77,8 @@ export async function runAgentLoop(config: LoopConfig): Promise<LoopResult> {
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let finalResponse = '';
+  const allContextEdits: ContextEditStats[] = [];
+  let totalTokensSavedByEdits = 0;
 
   const db = await getDb();
   const auditLog = db.collection('os_audit_log');
@@ -63,13 +86,45 @@ export async function runAgentLoop(config: LoopConfig): Promise<LoopResult> {
   while (iterations < maxIterations) {
     iterations++;
 
-    const response = await client.messages.create({
-      model: config.model,
-      max_tokens: 4096,
-      system: config.systemPrompt,
-      tools: allTools as Anthropic.Tool[],
-      messages,
-    });
+    // Use beta API if context management is enabled
+    let response: Anthropic.Message;
+    if (useContextManagement) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const betaResponse = await (client.beta.messages.create as any)({
+        model: config.model,
+        max_tokens: 4096,
+        system: config.systemPrompt,
+        tools: allTools,
+        messages,
+        betas: ['context-management-2025-06-27'],
+        context_management: config.contextManagement,
+      });
+      response = betaResponse as Anthropic.Message;
+
+      // Track context edits applied
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const contextMgmt = (betaResponse as any).context_management;
+      if (contextMgmt?.applied_edits?.length) {
+        for (const edit of contextMgmt.applied_edits) {
+          allContextEdits.push({
+            type: edit.type,
+            cleared_tool_uses: edit.cleared_tool_uses,
+            cleared_input_tokens: edit.cleared_input_tokens,
+          });
+          if (edit.cleared_input_tokens) {
+            totalTokensSavedByEdits += edit.cleared_input_tokens;
+          }
+        }
+      }
+    } else {
+      response = await client.messages.create({
+        model: config.model,
+        max_tokens: 4096,
+        system: config.systemPrompt,
+        tools: allTools as Anthropic.Tool[],
+        messages,
+      });
+    }
 
     totalInputTokens += response.usage.input_tokens;
     totalOutputTokens += response.usage.output_tokens;
@@ -153,11 +208,18 @@ export async function runAgentLoop(config: LoopConfig): Promise<LoopResult> {
     });
   }
 
-  return {
+  const result: LoopResult = {
     finalResponse,
     iterations,
     toolCallCount,
     inputTokens: totalInputTokens,
     outputTokens: totalOutputTokens,
   };
+  if (allContextEdits.length > 0) {
+    result.contextEditsApplied = allContextEdits;
+  }
+  if (totalTokensSavedByEdits > 0) {
+    result.tokensSavedByEdits = totalTokensSavedByEdits;
+  }
+  return result;
 }
