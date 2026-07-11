@@ -287,9 +287,11 @@ hamazasp (CTO):
   → Backend infrastructure, NestJS, Railway, Vercel updates
   → Solana ecosystem, blockchain development best practices
 
-narek (Legal & Compliance):
+narek + cnb (Legal & Compliance):
   → MiCA implementation updates, AML/KYC guidance, GDPR changes
   → Czech NBÚ and CNB advisories, EU regulatory enforcement
+  → For ALL regulation entries, use agentScope: ['narek', 'cnb']
+    (cnb is the regulatory challenger who needs the same intel)
 
 arshak (CFO):
   → EU fintech CFO trends, SaaS financial modeling, startup runway
@@ -405,8 +407,11 @@ function buildTools() {
               description: 'Required when isOpinion is true.',
             },
             agentScope: {
-              type: 'string',
-              description: 'Agent ID for professional-scope entries. Omit for org-wide.',
+              oneOf: [
+                { type: 'string' },
+                { type: 'array', items: { type: 'string' } }
+              ],
+              description: 'Agent ID (string) or array of agent IDs for professional-scope entries. Use array when multiple agents need the same entry (e.g., ["narek", "cnb"] for regulation entries). Omit for org-wide.',
             },
           },
           required: ['title','content','category','permanence','trustLevel','sourceType','signalScore'],

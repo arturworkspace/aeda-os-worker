@@ -55,7 +55,7 @@ export async function writeKnowledgeEntry(input: {
   signalScore: number;
   isOpinion?: boolean;
   authorName?: string;
-  agentScope?: string;
+  agentScope?: string | string[];  // Single agent ID or array of agent IDs
   verificationStatus?: 'confirmed' | 'informational' | 'pending';
 }): Promise<string> {
   const db = await getDb();
@@ -123,8 +123,13 @@ export async function writeKnowledgeEntry(input: {
     signalScore: score,
     noiseFlag: score <= 3,
     scope: input.agentScope ? 'professional' : 'organization',
-    targetAgent: input.agentScope || null,
-    relevantAgents: input.agentScope ? [input.agentScope] : [],
+    // Support both single agent ID and array of agent IDs
+    targetAgent: Array.isArray(input.agentScope)
+      ? input.agentScope[0]
+      : (input.agentScope || null),
+    relevantAgents: Array.isArray(input.agentScope)
+      ? input.agentScope
+      : (input.agentScope ? [input.agentScope] : []),
     createdAt: new Date(),
     updatedAt: new Date(),
     addedBy: 'hasmik',
