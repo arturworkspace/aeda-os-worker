@@ -3,6 +3,13 @@ import mongoose, { Schema, Types } from 'mongoose';
 export const DRAFT_STATUSES = ['pending', 'pushed_to_gmail', 'sent', 'rejected'] as const;
 export type DraftStatus = (typeof DRAFT_STATUSES)[number];
 
+export interface IComplianceFlag {
+  severity: 'HIGH' | 'MEDIUM';
+  phrase: string;
+  location: string;
+  suggestion: string;
+}
+
 export interface IEmailDraft {
   inbox_item_id: Types.ObjectId | null;
   drafted_by_agent: string;
@@ -28,6 +35,8 @@ export interface IEmailDraft {
   personalizationReasoning?: string;
   qualityScore?: number;
   contactConfidence?: 'verified' | 'inferred' | null;
+  // Compliance pre-filter flags (populated by Haiku check before @narek review)
+  complianceFlags?: IComplianceFlag[];
   // Test mode fields
   isTestMode?: boolean;
   realRecipient?: string;
@@ -61,6 +70,17 @@ const emailDraftSchema = new Schema<IEmailDraft>(
     personalizationReasoning: { type: String, required: false },
     qualityScore: { type: Number, required: false },
     contactConfidence: { type: String, enum: ['verified', 'inferred', null], required: false },
+    // Compliance pre-filter flags
+    complianceFlags: {
+      type: [{
+        severity: { type: String, enum: ['HIGH', 'MEDIUM'], required: true },
+        phrase: { type: String, required: true },
+        location: { type: String, required: true },
+        suggestion: { type: String, required: true },
+      }],
+      required: false,
+      default: undefined,
+    },
     // Test mode fields
     isTestMode: { type: Boolean, default: false },
     realRecipient: { type: String, required: false },

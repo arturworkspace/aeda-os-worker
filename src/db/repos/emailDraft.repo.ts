@@ -1,5 +1,5 @@
 import { Types, FilterQuery } from 'mongoose';
-import { EmailDraft, IEmailDraft, IEmailDraftDocument, DraftStatus } from '../schemas/emailDraft.js';
+import { EmailDraft, IEmailDraft, IEmailDraftDocument, DraftStatus, IComplianceFlag } from '../schemas/emailDraft.js';
 
 export interface CreateEmailDraftInput {
   inbox_item_id?: Types.ObjectId | null;
@@ -16,6 +16,8 @@ export interface CreateEmailDraftInput {
   personalizationReasoning?: string;
   qualityScore?: number;
   contactConfidence?: 'verified' | 'inferred' | null;
+  // Compliance pre-filter flags
+  complianceFlags?: IComplianceFlag[];
   // Test mode fields
   isTestMode?: boolean;
   realRecipient?: string;
@@ -39,6 +41,7 @@ export const emailDraftRepo = {
       personalizationReasoning: input.personalizationReasoning,
       qualityScore: input.qualityScore,
       contactConfidence: input.contactConfidence,
+      complianceFlags: input.complianceFlags,
       isTestMode: input.isTestMode,
       realRecipient: input.realRecipient,
     });

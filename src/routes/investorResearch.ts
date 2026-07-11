@@ -13,6 +13,7 @@ import { estimateCostUsd } from '../config/pricing.js';
 import { logger } from '../logger.js';
 import { getPersona } from '../agents/personas.js';
 import { isJuliaGmailConfigured, juliaCreateDraft, juliaSendDraft, searchThreads, getThreadById } from '../services/juliaGmail.js';
+import { checkEmailCompliance } from '../services/complianceCheck.js';
 
 const RESEARCH_DAILY_BUDGET_USD = Number(process.env['RESEARCH_DAILY_BUDGET_USD']) || 5;
 const JOB_NAME = 'investor-research';
@@ -1065,6 +1066,20 @@ CONTACT:
       );
     }
 
+    // Run compliance pre-filter check (Haiku-based, flag-only — does NOT block or rewrite)
+    const draftSubject = parsedDraft.subjectOptions[0] || 'Introduction from aeda';
+    const complianceResult = await checkEmailCompliance(draftSubject, parsedDraft.body);
+    totalCostUsd += complianceResult.costUsd;
+
+    if (complianceResult.flags.length > 0) {
+      const highCount = complianceResult.flags.filter(f => f.severity === 'HIGH').length;
+      const mediumCount = complianceResult.flags.filter(f => f.severity === 'MEDIUM').length;
+      logger.warn(
+        { investorId, investorName: investor.name, highCount, mediumCount, flags: complianceResult.flags },
+        'compliance pre-filter flagged issues in draft'
+      );
+    }
+
     // Determine email address and contact confidence
     const realEmail = research.contact?.email || investor.email || '';
     const contactConfidence = research.contact?.confidence || null;
@@ -1083,7 +1098,6 @@ CONTACT:
     }
 
     // Validate no forbidden placeholders BEFORE saving draft
-    const draftSubject = parsedDraft.subjectOptions[0] || 'Introduction from aeda';
     const placeholderCheck = validateNoForbiddenPlaceholders(draftSubject, parsedDraft.body, investor.name);
     if (!placeholderCheck.valid) {
       logger.error({
@@ -1128,11 +1142,11 @@ CONTACT:
       return;
     }
 
-    // Save draft
+    // Save draft (with compliance flags if any were found)
     const emailDraft = await emailDraftRepo.create({
       drafted_by_agent: 'julia',
       to: toEmail,
-      subject: parsedDraft.subjectOptions[0] || 'Introduction from aeda',
+      subject: draftSubject,
       body: parsedDraft.body,
       thread_context: `First outreach to ${investor.name} (${investor.firm || 'Unknown'})`,
       investorId: investorObjId,
@@ -1141,12 +1155,26 @@ CONTACT:
       personalizationReasoning: parsedDraft.personalizationReasoning,
       qualityScore: qualityResult.score,
       contactConfidence,
+      ...(complianceResult.flags.length > 0 ? { complianceFlags: complianceResult.flags } : {}),
       ...(isTestMode ? { isTestMode: true, realRecipient: realEmail } : {}),
     });
 
     // Create InboxItem so draft appears in Julia's inbox
     const testModePrefix = isTestMode ? '🧪 [TEST] ' : '';
     const testModeNote = isTestMode ? ` (TEST MODE: sends to ${testModeEmail}, real recipient: ${realEmail})` : '';
+
+    // Build compliance flag summary for inbox commentary
+    let complianceNote = '';
+    if (complianceResult.flags.length > 0) {
+      const highFlags = complianceResult.flags.filter(f => f.severity === 'HIGH');
+      const mediumFlags = complianceResult.flags.filter(f => f.severity === 'MEDIUM');
+      if (highFlags.length > 0) {
+        complianceNote = ` ⚠️ COMPLIANCE: ${highFlags.length} HIGH severity flag(s) — review required before sending.`;
+      } else if (mediumFlags.length > 0) {
+        complianceNote = ` ⚡ Compliance: ${mediumFlags.length} MEDIUM flag(s) for review.`;
+      }
+    }
+
     const inboxItem = new InboxItem({
       recipient: 'julia@aeda.internal',
       sender_email: 'system@aeda.internal',
@@ -1158,7 +1186,7 @@ CONTACT:
       body_text: parsedDraft.body,
       body_html: '',
       attachments: [],
-      agent_commentary: `${testModePrefix}First outreach email ready for review. Investor: ${investor.name} (${investor.firm || 'Unknown'}). Quality score: ${qualityResult.score}/10.${testModeNote}`,
+      agent_commentary: `${testModePrefix}First outreach email ready for review. Investor: ${investor.name} (${investor.firm || 'Unknown'}). Quality score: ${qualityResult.score}/10.${complianceNote}${testModeNote}`,
       draft_text: parsedDraft.body,
       received_at: new Date(),
       message_id: `investor-first-email-draft-${(emailDraft._id as Types.ObjectId).toHexString()}`,
@@ -1221,6 +1249,8 @@ CONTACT:
         investorName: investor.name,
         qualityScore: qualityResult.score,
         qualityReasoning: qualityResult.reasoning,
+        complianceFlagsCount: complianceResult.flags.length,
+        complianceHighCount: complianceResult.flags.filter(f => f.severity === 'HIGH').length,
         contactConfidence,
         totalCostUsd,
         durationMs: Date.now() - startTime,
