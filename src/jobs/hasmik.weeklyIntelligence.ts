@@ -503,7 +503,7 @@ export async function runHasmikIntelligence(): Promise<void> {
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
         costUsd,
-        estimatedMaxUsd: costUsd * 1.5,
+        estimatedMaxUsd: costUsd,
         tier: 'production',
       });
       logger.info({ costUsd, inputTokens: result.inputTokens, outputTokens: result.outputTokens }, '[hasmik] cost_ledger written');
