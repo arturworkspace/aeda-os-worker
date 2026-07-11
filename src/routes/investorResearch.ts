@@ -796,8 +796,11 @@ VOICE — Write like Artur actually writes:
 - No setup paragraphs like "Two tailwinds make this moment compelling..." — get to the point.
 - Not textbook-perfect grammar, but not broken either.
 
-LENGTH — 80-100 WORDS:
-This is a cold email a busy VC partner would actually read in full. Shorter is better, but you have room for one "why now" clause if it adds value.
+LENGTH — 80-100 WORDS (HARD CEILING):
+This is a cold email a busy VC partner would actually read in full. Shorter is better, but you have room for one "why now" clause if it adds value. The 100-word limit is absolute — emails over 100 words will be rejected and regenerated.
+
+OUTPUT — FINAL EMAIL ONLY:
+Return ONLY the finished email text. Never include meta-commentary, self-correction, visible thinking, or narration about your writing process. No "sorry," no "let me be direct," no commenting on your own phrasing. The output must be ready to send as-is.
 
 PERSONALIZATION — Ground it in their actual research:
 Look at the "Best Outreach Angle" field. That's the specific hook for THIS investor. Reference something real and verifiable about their firm, portfolio, or thesis. Not generic "you invest in fintech" — something specific only to them.
@@ -1017,9 +1020,80 @@ CONTACT:
       }
     }
 
-    const parsedDraft = parseFirstEmailDraftResponse(draftText);
+    let parsedDraft = parseFirstEmailDraftResponse(draftText);
     if (!parsedDraft) {
       logger.error({ investorId, rawResponse: draftText.slice(0, 500) }, 'failed to parse draft response');
+      return;
+    }
+
+    // Word count validation with retry (hard ceiling of 100 words)
+    const MAX_WORD_COUNT = 100;
+    const MAX_WORD_COUNT_RETRIES = 2;
+    let wordCountRetries = 0;
+    let wordCount = parsedDraft.body.split(/\s+/).filter(Boolean).length;
+
+    while (wordCount > MAX_WORD_COUNT && wordCountRetries < MAX_WORD_COUNT_RETRIES) {
+      wordCountRetries++;
+      logger.warn(
+        { investorId, wordCount, attempt: wordCountRetries },
+        `draft exceeds ${MAX_WORD_COUNT} word limit, regenerating`
+      );
+
+      const retryResponse = await anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        system: [
+          {
+            type: 'text',
+            text: FIRST_EMAIL_DRAFTING_SYSTEM,
+            cache_control: { type: 'ephemeral' },
+          },
+        ],
+        messages: [{
+          role: 'user',
+          content: `Draft a first-outreach email to this investor:\n\n${researchContext}\n\nIMPORTANT: Your previous draft was ${wordCount} words. The MAXIMUM is ${MAX_WORD_COUNT} words. Be more concise.`,
+        }],
+      });
+
+      const retryCost = estimateCostUsd('claude-sonnet-4-6', {
+        input_tokens: retryResponse.usage.input_tokens,
+        output_tokens: retryResponse.usage.output_tokens,
+        cache_creation_input_tokens: (retryResponse.usage as { cache_creation_input_tokens?: number }).cache_creation_input_tokens,
+        cache_read_input_tokens: (retryResponse.usage as { cache_read_input_tokens?: number }).cache_read_input_tokens,
+      });
+      totalCostUsd += retryCost;
+
+      await costLedgerRepo.insert({
+        agentOrJob: 'investor-email-draft',
+        packageId: null,
+        projectKey: null,
+        llmModel: 'claude-sonnet-4-6',
+        inputTokens: retryResponse.usage.input_tokens,
+        outputTokens: retryResponse.usage.output_tokens,
+        costUsd: retryCost,
+        estimatedMaxUsd: retryCost,
+        tier: 'production',
+      });
+
+      let retryText = '';
+      for (const block of retryResponse.content) {
+        if (block.type === 'text') {
+          retryText += block.text;
+        }
+      }
+
+      const retryParsed = parseFirstEmailDraftResponse(retryText);
+      if (retryParsed) {
+        parsedDraft = retryParsed;
+        wordCount = parsedDraft.body.split(/\s+/).filter(Boolean).length;
+      }
+    }
+
+    if (wordCount > MAX_WORD_COUNT) {
+      logger.error(
+        { investorId, wordCount, attempts: wordCountRetries + 1 },
+        `draft still exceeds ${MAX_WORD_COUNT} words after retries, rejecting`
+      );
       return;
     }
 
