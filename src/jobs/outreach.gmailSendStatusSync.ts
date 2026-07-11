@@ -1,28 +1,23 @@
 import { Agenda, Job } from 'agenda';
 import { Types } from 'mongoose';
+import Anthropic from '@anthropic-ai/sdk';
 import { emailDraftRepo } from '../db/repos/emailDraft.repo.js';
 import { investorRepo } from '../db/repos/investor.repo.js';
+import { costLedgerRepo } from '../db/repos/costLedger.repo.js';
 import { Investor } from '../db/schemas/investor.js';
 import { isJuliaGmailConfigured, juliaDeleteDraft } from '../services/juliaGmail.js';
 import { InboxItem } from '../db/schemas/inboxItem.js';
 import { writeAuditEvent } from '../core/auditLog.js';
 import { logger } from '../logger.js';
 import { google } from 'googleapis';
+import { estimateCostUsd } from '../config/pricing.js';
+
+const anthropic = new Anthropic();
 
 export const JOB_NAME = 'outreach.gmailSendStatusSync';
 
 const JULIA_EMAIL = 'julia@aedawallet.com';
 const ARTUR_EMAIL = 'artur@aedawallet.com';
-
-// Keywords for sentiment classification (cheap keyword-based approach first)
-const NEGATIVE_KEYWORDS = [
-  'pass', 'passing', 'not moving forward', 'not a fit', 'not the right fit',
-  'decline', 'declining', 'not interested', 'no longer investing',
-  'not actively investing', 'pause', 'pausing', 'hold off',
-  'not at this time', 'not right now', 'not currently',
-  'outside our mandate', 'outside of our focus', 'not aligned',
-  'best of luck', 'good luck', 'wish you well', 'wishing you success',
-];
 
 let juliaGmailClient: ReturnType<typeof google.gmail> | null = null;
 
@@ -43,14 +38,75 @@ function getJuliaGmailClient(): ReturnType<typeof google.gmail> | null {
   return juliaGmailClient;
 }
 
-function classifySentiment(body: string): 'positive' | 'negative' {
-  const lowerBody = body.toLowerCase();
-  for (const keyword of NEGATIVE_KEYWORDS) {
-    if (lowerBody.includes(keyword)) {
-      return 'negative';
-    }
+const SENTIMENT_CLASSIFICATION_PROMPT = `You are classifying investor email replies to a startup's outreach.
+
+The startup (aeda) sent a fundraising/intro email to an investor. The investor has replied. Your task is to classify the reply sentiment:
+
+- "positive": The investor is interested, wants to learn more, requests the deck, suggests a call, asks follow-up questions, or gives any indication they want to continue the conversation.
+- "negative": The investor is declining, passing, not interested, says it's not a fit, outside their scope/mandate/focus, not investing right now, or any form of rejection — even if politely worded.
+
+Important: Polite rejections ("unfortunately", "best of luck", "not in our scope") are NEGATIVE, not positive. The presence of pleasantries does not make a decline positive.
+
+Reply with ONLY the word "positive" or "negative" — no explanation, no punctuation.`;
+
+interface SentimentClassificationResult {
+  sentiment: 'positive' | 'negative';
+  costUsd: number;
+  rawResponse: string;
+}
+
+async function classifySentimentWithLLM(body: string, investorName: string): Promise<SentimentClassificationResult> {
+  const truncatedBody = body.slice(0, 2000); // Limit context to save tokens
+
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 10,
+      system: SENTIMENT_CLASSIFICATION_PROMPT,
+      messages: [{
+        role: 'user',
+        content: `Investor "${investorName}" replied:\n\n${truncatedBody}`,
+      }],
+    });
+
+    const costUsd = estimateCostUsd('claude-haiku-4-5-20251001', {
+      input_tokens: response.usage.input_tokens,
+      output_tokens: response.usage.output_tokens,
+    });
+
+    await costLedgerRepo.insert({
+      agentOrJob: JOB_NAME,
+      packageId: null,
+      projectKey: null,
+      llmModel: 'claude-haiku-4-5-20251001',
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      costUsd,
+      estimatedMaxUsd: costUsd,
+      tier: 'background',
+    });
+
+    const rawResponse = response.content[0]?.type === 'text' ? response.content[0].text.trim().toLowerCase() : '';
+
+    logger.info({
+      investorName,
+      bodyPreview: truncatedBody.slice(0, 150),
+      rawResponse,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      costUsd,
+    }, 'LLM sentiment classification completed');
+
+    // Parse response - default to negative if unclear (safer for rejection detection)
+    const sentiment: 'positive' | 'negative' = rawResponse.includes('positive') ? 'positive' : 'negative';
+
+    return { sentiment, costUsd, rawResponse };
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    logger.error({ error: errMsg, investorName }, 'LLM sentiment classification failed, defaulting to negative');
+    // Default to negative on error - safer to flag for human review
+    return { sentiment: 'negative', costUsd: 0, rawResponse: `ERROR: ${errMsg}` };
   }
-  return 'positive';
 }
 
 export interface GmailSendStatusSyncResult {
@@ -298,8 +354,15 @@ export async function runGmailSendStatusSync(): Promise<GmailSendStatusSyncResul
                 bodyText = Buffer.from(msg.payload.body.data, 'base64').toString('utf-8');
               }
 
-              const sentiment = classifySentiment(bodyText);
-              logger.info({ investorId: investor._id, sentiment, bodyPreview: bodyText.slice(0, 100) }, 'classified reply sentiment');
+              const classificationResult = await classifySentimentWithLLM(bodyText, investor.name);
+              const sentiment = classificationResult.sentiment;
+              logger.info({
+                investorId: investor._id,
+                sentiment,
+                bodyPreview: bodyText.slice(0, 100),
+                rawLLMResponse: classificationResult.rawResponse,
+                classificationCostUsd: classificationResult.costUsd,
+              }, 'classified reply sentiment via LLM');
 
               // Mark reply received
               await investorRepo.markReplyReceived(investor._id as Types.ObjectId, sentiment);

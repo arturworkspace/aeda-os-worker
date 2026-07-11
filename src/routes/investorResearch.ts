@@ -7,6 +7,7 @@ import { Investor, IInvestorDocument } from '../db/schemas/investor.js';
 import { InboxItem } from '../db/schemas/inboxItem.js';
 import { costLedgerRepo } from '../db/repos/costLedger.repo.js';
 import { emailDraftRepo } from '../db/repos/emailDraft.repo.js';
+import { investorRepo } from '../db/repos/investor.repo.js';
 import { writeAuditEvent } from '../core/auditLog.js';
 import { estimateCostUsd } from '../config/pricing.js';
 import { logger } from '../logger.js';
@@ -2119,6 +2120,84 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       logger.error({ error: errorMsg, investorId, draftGmailId }, 'redirect-and-send-draft failed');
+      res.status(500).json({ error: errorMsg });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CORRECT-SENTIMENT: Manually correct reply sentiment classification
+  // Used when LLM misclassifies a reply (e.g., polite rejection as positive)
+  // ═══════════════════════════════════════════════════════════════════════════
+  router.post('/correct-sentiment', async (req: Request, res: Response) => {
+    const provided = req.headers['x-trigger-secret'];
+    const expected = process.env['TRIGGER_SECRET'];
+    if (!expected || provided !== expected) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { investorId, newSentiment, reason } = req.body as {
+      investorId?: string;
+      newSentiment?: 'positive' | 'negative';
+      reason?: string;
+    };
+
+    if (!investorId || !Types.ObjectId.isValid(investorId)) {
+      res.status(400).json({ error: 'Invalid investorId' });
+      return;
+    }
+    if (!newSentiment || !['positive', 'negative'].includes(newSentiment)) {
+      res.status(400).json({ error: 'newSentiment must be "positive" or "negative"' });
+      return;
+    }
+
+    try {
+      const investorObjId = new Types.ObjectId(investorId);
+      const investor = await Investor.findById(investorObjId).exec();
+      if (!investor) {
+        res.status(404).json({ error: 'Investor not found' });
+        return;
+      }
+
+      const oldSentiment = investor.replySentiment;
+
+      // Use the repo method which adds activity log entry
+      const updatedInvestor = await investorRepo.correctSentiment(investorObjId, newSentiment);
+
+      logger.info({
+        investorId,
+        investorName: investor.name,
+        oldSentiment,
+        newSentiment,
+        reason: reason || 'Manual correction',
+      }, 'sentiment corrected');
+
+      await writeAuditEvent({
+        actor: 'system',
+        actorType: 'system',
+        eventType: 'job.run',
+        subjectId: investorObjId,
+        payload: {
+          jobName: 'correct-sentiment',
+          investorId,
+          investorName: investor.name,
+          oldSentiment,
+          newSentiment,
+          reason: reason || 'Manual correction',
+        },
+      });
+
+      res.json({
+        status: 'corrected',
+        investorId,
+        investorName: investor.name,
+        oldSentiment,
+        newSentiment,
+        derivedStage: newSentiment === 'positive' ? 'Answered' : 'Rejected',
+      });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      logger.error({ error: errorMsg, investorId }, 'correct-sentiment failed');
       res.status(500).json({ error: errorMsg });
     }
   });
