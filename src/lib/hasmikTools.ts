@@ -44,7 +44,7 @@ export async function writeKnowledgeEntry(input: {
   title: string;
   content: string;
   category: 'regulation' | 'technology' | 'market' | 'competitor'
-          | 'partner' | 'education' | 'general';
+          | 'partner' | 'education' | 'general' | 'influencer' | 'product';
   permanence: 'permanent' | 'temporary';
   expiryDays?: number;
   trustLevel: 'verified' | 'informational' | 'signal';

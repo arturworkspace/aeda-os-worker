@@ -182,9 +182,10 @@ Work through ALL of these domains every run:
    Helius, Cloudflare
    Search: performance updates, security advisories, pricing changes
 
-5. PRODUCT / INFRASTRUCTURE
+5. PRODUCT / INFRASTRUCTURE (category: 'product')
    Circle EURC, Bridge.xyz, Sumsub, Sky Labs, Helius, Privy
    Search: product updates, pricing changes, outages
+   → Use category: 'product' for all entries from this domain
 
 6. COMPETITORS — Stablecoin Apps
    Rizon, Sling Money, Zixi Pay, Parsek, PEXX, Dollarize,
@@ -201,8 +202,10 @@ Work through ALL of these domains every run:
    EU pre-seed fintech funding rounds this week,
    EECA corridor investment activity
 
-9. THOUGHT LEADERS (monitored list only)
+9. THOUGHT LEADERS / INFLUENCERS (category: 'influencer')
+   Monitored list only: ${MONITORED_THOUGHT_LEADERS.join(', ')}
    → All LinkedIn content from these sources: isOpinion: true, max score 6
+   → Use category: 'influencer' for all entries from this domain
 
 10. FUNDRAISING OPPORTUNITIES
     EU accelerators, grants, government programs
@@ -240,16 +243,21 @@ Today: ${today}. Current week started: ${weekStartStr}.
 
 SEQUENCE — work through in this order:
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PHASE 1: ORGANIZATION-WIDE INTELLIGENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 1. Read recent knowledge titles (call read_recent_knowledge_titles
    for each category) to understand what already exists.
 
 2. Research and write entries domain by domain:
    - Regulation: EBA, ESMA, EC, ECB, CNB, CBA, FATF, SEC, CFTC
    - Technology: Solana, Circle EURC, Bridge.xyz, Sumsub, Helius
+   - Product: Circle EURC updates, Bridge.xyz, Sumsub, Privy, Helius
    - Competitors: all 11 stablecoin apps + 8 remittance players
    - Wise specifically: any Armenia re-entry signal?
    - Market: EU pre-seed fintech raises this week
-   - Thought leaders: Simon Taylor, Nic Carter, Marcel van Oost,
+   - Influencers: Simon Taylor, Nic Carter, Marcel van Oost,
      Jeremy Allaire — blogs and newsletters only
 
 3. For any significant LinkedIn content not from your monitored list:
@@ -260,13 +268,81 @@ SEQUENCE — work through in this order:
 
 5. Write all relevant fundraising opportunities for aeda.
 
-6. End with a structured summary:
-   - Entries written to knowledge base (count by category)
-   - Fundraising rounds found
-   - Opportunities written
-   - Items flagged to inbox
-   - Top 3 signals this week (highest relevance to aeda)
-   - Any items needing Artur's immediate attention
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PHASE 2: AGENT-SPECIFIC PROFESSIONAL UPDATES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+After completing Phase 1, research and write entries FOR EACH
+of these 12 agents. You MUST call write_knowledge_entry with
+agentScope set to the agent's ID for these entries.
+
+For EACH agent below, research their professional domain and
+write 1-3 entries with agentScope: '<agent-id>':
+
+ham (CEO):
+  → Startup CEO best practices, founder mental health, leadership
+  → EU fintech founder stories, CEO compensation benchmarks
+
+narek (Legal & Compliance):
+  → MiCA implementation updates, AML/KYC guidance, GDPR changes
+  → Czech NBÚ and CNB advisories, EU regulatory enforcement
+
+arshak (CFO):
+  → EU fintech CFO trends, SaaS financial modeling, startup runway
+  → ACCA/CPA updates, audit requirements for EU fintechs
+
+mike (Product Design):
+  → Figma updates, design system trends, fintech UX patterns
+  → Mobile wallet design, accessibility standards
+
+anna (Product):
+  → Claude API updates, Anthropic research, AI product management
+  → LLM application patterns, AI agent frameworks
+
+tatev (PR):
+  → Fintech PR strategies, startup media relations, EU tech press
+  → Content marketing trends, brand positioning for fintechs
+
+sofi (Social Media):
+  → LinkedIn algorithm changes, TikTok business updates, Instagram B2B
+  → Social media analytics, fintech influencer marketing
+
+ruzan (SEO/Content):
+  → Google algorithm updates, fintech SEO, content strategy
+  → LLMO (LLM optimization), AI-first content structuring
+
+chris (Business Development):
+  → EU fintech partnerships, M&A activity, strategic alliances
+  → VC funding patterns, stablecoin business development
+
+alex (Customer Success):
+  → Customer success tools, Zendesk/Intercom updates, support AI
+  → Fintech customer experience, churn reduction strategies
+
+vagho (Security):
+  → OWASP updates, CVEs for Node.js/Vercel/Railway, AI security
+  → Crypto wallet security, zero trust architecture, MCP security
+
+laura (Partnerships):
+  → Privy, Turnkey, Dynamic wallet SDKs, embedded wallet trends
+  → Non-custodial wallet infrastructure, KYC provider updates
+
+CRITICAL: For Phase 2, every write_knowledge_entry call MUST include
+agentScope: '<agent-id>' (e.g., agentScope: 'vagho'). Entries without
+agentScope will not appear in the agent's knowledge feed.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PHASE 3: SUMMARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+End with a structured summary:
+- Phase 1 entries written (count by category)
+- Phase 2 entries written (count by agent)
+- Fundraising rounds found
+- Opportunities written
+- Items flagged to inbox
+- Top 3 signals this week (highest relevance to aeda)
+- Any items needing Artur's immediate attention
 
 Quality standard: every entry must be something you would
 confidently present to a sophisticated fintech CEO.
@@ -289,7 +365,7 @@ function buildTools() {
             content: { type: 'string', description: 'Specific, actionable content, 100-500 chars' },
             category: {
               type: 'string',
-              enum: ['regulation','technology','market','competitor','partner','education','general'],
+              enum: ['regulation','technology','market','competitor','partner','education','general','influencer','product'],
             },
             permanence: { type: 'string', enum: ['permanent','temporary'] },
             expiryDays: {
