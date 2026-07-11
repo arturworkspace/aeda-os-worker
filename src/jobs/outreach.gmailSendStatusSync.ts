@@ -4,7 +4,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { emailDraftRepo } from '../db/repos/emailDraft.repo.js';
 import { investorRepo } from '../db/repos/investor.repo.js';
 import { costLedgerRepo } from '../db/repos/costLedger.repo.js';
-import { Investor } from '../db/schemas/investor.js';
+import { Investor, IThreadMessage } from '../db/schemas/investor.js';
 import { isJuliaGmailConfigured, juliaDeleteDraft } from '../services/juliaGmail.js';
 import { InboxItem } from '../db/schemas/inboxItem.js';
 import { writeAuditEvent } from '../core/auditLog.js';
@@ -115,6 +115,7 @@ export interface GmailSendStatusSyncResult {
   updatedCount: number;
   repliesDetected: number;
   draftsRemoved: number;
+  threadsSynced: number;
   durationMs: number;
   error?: string;
 }
@@ -125,6 +126,7 @@ export async function runGmailSendStatusSync(): Promise<GmailSendStatusSyncResul
   let updatedCount = 0;
   let repliesDetected = 0;
   let draftsRemoved = 0;
+  let threadsSynced = 0;
 
   if (!isJuliaGmailConfigured()) {
     logger.warn('julia gmail not configured, skipping send status sync');
@@ -134,6 +136,7 @@ export async function runGmailSendStatusSync(): Promise<GmailSendStatusSyncResul
       updatedCount: 0,
       repliesDetected: 0,
       draftsRemoved: 0,
+      threadsSynced: 0,
       durationMs: Date.now() - startTime,
       error: 'julia gmail not configured',
     };
@@ -148,6 +151,7 @@ export async function runGmailSendStatusSync(): Promise<GmailSendStatusSyncResul
       updatedCount: 0,
       repliesDetected: 0,
       draftsRemoved: 0,
+      threadsSynced: 0,
       durationMs: Date.now() - startTime,
       error: 'gmail client not available',
     };
@@ -423,7 +427,98 @@ export async function runGmailSendStatusSync(): Promise<GmailSendStatusSyncResul
       }
     }
 
-    logger.info({ checkedCount, updatedCount, repliesDetected, draftsRemoved }, 'gmail send status sync completed');
+    // ═══════════════════════════════════════════════════════════════════
+    // PART 3: Sync full thread messages for investors with gmail_thread_id
+    // ═══════════════════════════════════════════════════════════════════
+    const investorsWithThreads = await Investor.find({
+      firstEmailSentAt: { $exists: true, $ne: null },
+    }).exec();
+
+    logger.info({ count: investorsWithThreads.length }, 'syncing thread messages for investors');
+
+    for (const investor of investorsWithThreads) {
+      // Find the gmail_thread_id from drafts
+      const sentDrafts = await emailDraftRepo.find({
+        investorId: investor._id,
+        gmail_thread_id: { $exists: true, $ne: null },
+        status: 'sent',
+      });
+
+      if (sentDrafts.length === 0) continue;
+
+      const threadId = sentDrafts[0]?.gmail_thread_id;
+      if (!threadId) continue;
+
+      try {
+        const threadResponse = await gmailClient.users.threads.get({
+          userId: 'me',
+          id: threadId,
+          format: 'full',
+        });
+
+        const messages = threadResponse.data.messages || [];
+        const threadMessages: IThreadMessage[] = [];
+
+        for (const msg of messages) {
+          const labels = msg.labelIds || [];
+          // Skip draft-only messages (not yet sent)
+          if (labels.includes('DRAFT') && !labels.includes('SENT')) continue;
+
+          const headers = msg.payload?.headers || [];
+          const from = headers.find(h => h.name?.toLowerCase() === 'from')?.value || '';
+          const to = headers.find(h => h.name?.toLowerCase() === 'to')?.value || '';
+          const subject = headers.find(h => h.name?.toLowerCase() === 'subject')?.value || '';
+
+          const isOutbound = from.includes(JULIA_EMAIL) || from.includes(ARTUR_EMAIL);
+
+          // Extract body text
+          let bodyText = '';
+          const textPart = msg.payload?.parts?.find(p => p.mimeType === 'text/plain');
+          if (textPart?.body?.data) {
+            bodyText = Buffer.from(textPart.body.data, 'base64').toString('utf-8');
+          } else if (msg.payload?.body?.data) {
+            bodyText = Buffer.from(msg.payload.body.data, 'base64').toString('utf-8');
+          }
+
+          const sentAt = msg.internalDate
+            ? new Date(parseInt(msg.internalDate, 10))
+            : new Date();
+
+          threadMessages.push({
+            gmailMessageId: msg.id || '',
+            direction: isOutbound ? 'outbound' : 'inbound',
+            from,
+            to,
+            subject,
+            bodyText,
+            sentAt,
+            labelIds: labels,
+          });
+        }
+
+        // Sort chronologically
+        threadMessages.sort((a, b) => a.sentAt.getTime() - b.sentAt.getTime());
+
+        // Update investor with thread messages
+        await Investor.findByIdAndUpdate(investor._id, {
+          threadMessages,
+          threadSyncedAt: new Date(),
+          emailThreadId: threadId,
+        });
+
+        threadsSynced++;
+        logger.info({
+          investorId: investor._id,
+          investorName: investor.name,
+          messageCount: threadMessages.length,
+        }, 'synced thread messages for investor');
+      } catch (syncErr) {
+        const errMsg = syncErr instanceof Error ? syncErr.message : String(syncErr);
+        logger.warn({ error: errMsg, investorId: investor._id }, 'failed to sync thread messages');
+      }
+    }
+
+    logger.info({ checkedCount, updatedCount, repliesDetected, draftsRemoved, threadsSynced }, 'gmail send status sync completed');
 
     return {
       success: true,
@@ -431,6 +526,7 @@ export async function runGmailSendStatusSync(): Promise<GmailSendStatusSyncResul
       updatedCount,
       repliesDetected,
       draftsRemoved,
+      threadsSynced,
       durationMs: Date.now() - startTime,
     };
   } catch (error: unknown) {
@@ -442,6 +538,7 @@ export async function runGmailSendStatusSync(): Promise<GmailSendStatusSyncResul
       updatedCount,
       repliesDetected,
       draftsRemoved,
+      threadsSynced,
       durationMs: Date.now() - startTime,
       error: errMsg,
     };

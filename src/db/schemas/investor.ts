@@ -5,6 +5,17 @@ export interface IActivityLogEntry {
   at: Date;
 }
 
+export interface IThreadMessage {
+  gmailMessageId: string;
+  direction: 'outbound' | 'inbound';
+  from: string;
+  to: string;
+  subject: string;
+  bodyText: string;
+  sentAt: Date;
+  labelIds: string[];
+}
+
 export interface IInvestor {
   name: string;
   firm: string;
@@ -31,6 +42,8 @@ export interface IInvestor {
   replySentiment?: 'positive' | 'negative' | null;
   stageConfirmed?: boolean;
   activityLog?: IActivityLogEntry[];
+  threadMessages?: IThreadMessage[];
+  threadSyncedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -41,6 +54,20 @@ const activityLogSchema = new Schema<IActivityLogEntry>(
   {
     action: { type: String, required: true },
     at: { type: Date, required: true },
+  },
+  { _id: false }
+);
+
+const threadMessageSchema = new Schema<IThreadMessage>(
+  {
+    gmailMessageId: { type: String, required: true },
+    direction: { type: String, enum: ['outbound', 'inbound'], required: true },
+    from: { type: String, required: true },
+    to: { type: String, required: true },
+    subject: { type: String, required: true },
+    bodyText: { type: String, required: true },
+    sentAt: { type: Date, required: true },
+    labelIds: { type: [String], default: [] },
   },
   { _id: false }
 );
@@ -80,6 +107,8 @@ const investorSchema = new Schema<IInvestor>(
     replySentiment: { type: String, enum: ['positive', 'negative', null], required: false },
     stageConfirmed: { type: Boolean, required: false, default: false },
     activityLog: { type: [activityLogSchema], default: [] },
+    threadMessages: { type: [threadMessageSchema], default: [] },
+    threadSyncedAt: { type: Date, required: false },
   },
   {
     collection: 'investors',
