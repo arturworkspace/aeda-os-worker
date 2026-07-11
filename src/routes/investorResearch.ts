@@ -1208,6 +1208,17 @@ CONTACT:
       return;
     }
 
+    // Idempotency guard: check if a non-sent draft already exists for this investor
+    // This prevents duplicate drafts when multiple requests arrive before the first one completes
+    const existingDraft = await emailDraftRepo.findByInvestorAndDraftType(investorObjId, 'first_email');
+    if (existingDraft && existingDraft.status !== 'sent') {
+      logger.info(
+        { investorId, existingDraftId: existingDraft._id.toString() },
+        'first-email draft already exists for this investor, skipping duplicate creation'
+      );
+      return;
+    }
+
     // Save draft (with compliance flags if any were found)
     const emailDraft = await emailDraftRepo.create({
       drafted_by_agent: 'julia',
