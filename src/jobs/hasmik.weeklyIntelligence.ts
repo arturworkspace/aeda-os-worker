@@ -465,6 +465,7 @@ export async function runHasmikIntelligence(): Promise<void> {
       jobName: JOB_NAME,
       builtInTools: [{ type: 'web_search_20250305', name: 'web_search' }],
       customTools: buildTools(),
+      cacheSystemPrompt: true,
       contextManagement: {
         edits: [{
           type: 'clear_tool_uses_20250919',
@@ -499,6 +500,11 @@ export async function runHasmikIntelligence(): Promise<void> {
         editsApplied: result.contextEditsApplied ?? [],
         tokensSavedByEdits: result.tokensSavedByEdits ?? 0,
       },
+      promptCaching: {
+        enabled: true,
+        cacheCreationTokens: result.cacheCreationTokens ?? 0,
+        cacheReadTokens: result.cacheReadTokens ?? 0,
+      },
       createdAt: new Date(),
     });
 
@@ -516,6 +522,10 @@ export async function runHasmikIntelligence(): Promise<void> {
       contextManagement: {
         editsApplied: result.contextEditsApplied ?? [],
         tokensSavedByEdits: result.tokensSavedByEdits ?? 0,
+      },
+      promptCaching: {
+        cacheCreationTokens: result.cacheCreationTokens ?? 0,
+        cacheReadTokens: result.cacheReadTokens ?? 0,
       },
       summary: result.finalResponse.slice(0, 500),
       createdAt: new Date(),
@@ -553,6 +563,10 @@ export async function runHasmikIntelligence(): Promise<void> {
         contextManagement: {
           editsApplied: result.contextEditsApplied?.length ?? 0,
           tokensSavedByEdits: result.tokensSavedByEdits ?? 0,
+        },
+        promptCaching: {
+          cacheCreationTokens: result.cacheCreationTokens ?? 0,
+          cacheReadTokens: result.cacheReadTokens ?? 0,
         },
       },
       `@hasmik complete`

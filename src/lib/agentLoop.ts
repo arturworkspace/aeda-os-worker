@@ -35,6 +35,7 @@ export interface LoopConfig {
   contextManagement?: {
     edits: ContextManagementEdit[];
   };
+  cacheSystemPrompt?: boolean;
 }
 
 export interface ContextEditStats {
@@ -51,6 +52,8 @@ export interface LoopResult {
   outputTokens: number;
   contextEditsApplied?: ContextEditStats[];
   tokensSavedByEdits?: number;
+  cacheCreationTokens?: number;
+  cacheReadTokens?: number;
 }
 
 export async function runAgentLoop(config: LoopConfig): Promise<LoopResult> {
@@ -72,6 +75,11 @@ export async function runAgentLoop(config: LoopConfig): Promise<LoopResult> {
     { role: 'user', content: config.initialMessage }
   ];
 
+  // Build system prompt — use content blocks with cache_control if caching enabled
+  const systemParam = config.cacheSystemPrompt
+    ? [{ type: 'text' as const, text: config.systemPrompt, cache_control: { type: 'ephemeral' as const } }]
+    : config.systemPrompt;
+
   let iterations = 0;
   let toolCallCount = 0;
   let totalInputTokens = 0;
@@ -79,6 +87,8 @@ export async function runAgentLoop(config: LoopConfig): Promise<LoopResult> {
   let finalResponse = '';
   const allContextEdits: ContextEditStats[] = [];
   let totalTokensSavedByEdits = 0;
+  let totalCacheCreationTokens = 0;
+  let totalCacheReadTokens = 0;
 
   const db = await getDb();
   const auditLog = db.collection('os_audit_log');
@@ -93,7 +103,7 @@ export async function runAgentLoop(config: LoopConfig): Promise<LoopResult> {
       const betaResponse = await (client.beta.messages.create as any)({
         model: config.model,
         max_tokens: 4096,
-        system: config.systemPrompt,
+        system: systemParam,
         tools: allTools,
         messages,
         betas: ['context-management-2025-06-27'],
@@ -120,11 +130,21 @@ export async function runAgentLoop(config: LoopConfig): Promise<LoopResult> {
       response = await client.messages.create({
         model: config.model,
         max_tokens: 4096,
-        system: config.systemPrompt,
+        system: systemParam,
         tools: allTools as Anthropic.Tool[],
         messages,
       });
     }
+
+    // Track cache stats if available
+    const usage = response.usage as {
+      input_tokens: number;
+      output_tokens: number;
+      cache_creation_input_tokens?: number;
+      cache_read_input_tokens?: number;
+    };
+    totalCacheCreationTokens += usage.cache_creation_input_tokens ?? 0;
+    totalCacheReadTokens += usage.cache_read_input_tokens ?? 0;
 
     totalInputTokens += response.usage.input_tokens;
     totalOutputTokens += response.usage.output_tokens;
@@ -220,6 +240,12 @@ export async function runAgentLoop(config: LoopConfig): Promise<LoopResult> {
   }
   if (totalTokensSavedByEdits > 0) {
     result.tokensSavedByEdits = totalTokensSavedByEdits;
+  }
+  if (totalCacheCreationTokens > 0) {
+    result.cacheCreationTokens = totalCacheCreationTokens;
+  }
+  if (totalCacheReadTokens > 0) {
+    result.cacheReadTokens = totalCacheReadTokens;
   }
   return result;
 }
