@@ -116,6 +116,10 @@ const FORBIDDEN_PLACEHOLDERS = [
   '[PENDING FINANCIAL UPDATE]',
   '[First Name]',
   '[FIRST NAME]',
+  '[Name]',
+  '[NAME]',
+  '[Firm]',
+  '[FIRM]',
 ];
 
 export async function juliaCreateDraft(
