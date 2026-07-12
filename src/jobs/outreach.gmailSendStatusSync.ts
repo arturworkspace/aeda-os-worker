@@ -206,15 +206,27 @@ export async function runGmailSendStatusSync(): Promise<GmailSendStatusSyncResul
               await emailDraftRepo.markAsSent(draft._id, sentAt || new Date());
               updatedCount++;
 
-              if (draft.investorId && draft.draftType === 'first_email') {
-                const investor = await investorRepo.findById(draft.investorId);
-                if (investor && !investor.firstEmailSentAt) {
-                  await Investor.findByIdAndUpdate(draft.investorId, {
-                    firstEmailSentAt: sentAt || new Date(),
-                    $push: { activityLog: { action: 'first_email_sent_auto', at: new Date() } },
-                  });
-                  logger.info({ investorId: draft.investorId }, 'set firstEmailSentAt on investor');
+              // Update investor record when email is sent
+              if (draft.investorId) {
+                const contactDate = sentAt || new Date();
+                const contactDateStr = contactDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+
+                const updatePayload: Record<string, unknown> = {
+                  lastContact: contactDateStr,
+                };
+
+                if (draft.draftType === 'first_email') {
+                  const investor = await investorRepo.findById(draft.investorId);
+                  if (investor && !investor.firstEmailSentAt) {
+                    updatePayload['firstEmailSentAt'] = contactDate;
+                  }
                 }
+
+                await Investor.findByIdAndUpdate(draft.investorId, {
+                  ...updatePayload,
+                  $push: { activityLog: { action: `${draft.draftType || 'email'}_sent_auto`, at: new Date() } },
+                });
+                logger.info({ investorId: draft.investorId, lastContact: contactDateStr }, 'updated investor lastContact on send detection');
               }
               continue;
             }
@@ -259,16 +271,27 @@ export async function runGmailSendStatusSync(): Promise<GmailSendStatusSyncResul
           await emailDraftRepo.markAsSent(draft._id, sentAt || new Date());
           updatedCount++;
 
-          // Also update investor's firstEmailSentAt if this is a first_email and not already set
-          if (draft.investorId && draft.draftType === 'first_email') {
-            const investor = await investorRepo.findById(draft.investorId);
-            if (investor && !investor.firstEmailSentAt) {
-              await Investor.findByIdAndUpdate(draft.investorId, {
-                firstEmailSentAt: sentAt || new Date(),
-                $push: { activityLog: { action: 'first_email_sent_auto', at: new Date() } },
-              });
-              logger.info({ investorId: draft.investorId }, 'set firstEmailSentAt on investor (auto-detected from gmail)');
+          // Update investor record when email is sent
+          if (draft.investorId) {
+            const contactDate = sentAt || new Date();
+            const contactDateStr = contactDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+
+            const updatePayload: Record<string, unknown> = {
+              lastContact: contactDateStr,
+            };
+
+            if (draft.draftType === 'first_email') {
+              const investor = await investorRepo.findById(draft.investorId);
+              if (investor && !investor.firstEmailSentAt) {
+                updatePayload['firstEmailSentAt'] = contactDate;
+              }
             }
+
+            await Investor.findByIdAndUpdate(draft.investorId, {
+              ...updatePayload,
+              $push: { activityLog: { action: `${draft.draftType || 'email'}_sent_auto`, at: new Date() } },
+            });
+            logger.info({ investorId: draft.investorId, lastContact: contactDateStr }, 'updated investor lastContact on send detection (draft 404)');
           }
         } else {
           logger.warn({ error: err.message, draftId: draft.gmail_draft_id }, 'error checking draft status');
