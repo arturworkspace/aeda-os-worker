@@ -446,7 +446,15 @@ export async function runGmailSendStatusSync(): Promise<GmailSendStatusSyncResul
         }
       } catch (threadErr) {
         const errMsg = threadErr instanceof Error ? threadErr.message : String(threadErr);
-        logger.warn({ error: errMsg, threadId: latestDraft.gmail_thread_id }, 'error checking thread for replies');
+        const errCode = (threadErr as { code?: number; status?: number })?.code
+          ?? (threadErr as { code?: number; status?: number })?.status;
+        logger.error({
+          error: errMsg,
+          errorCode: errCode,
+          investorId: investor._id,
+          investorName: investor.name,
+          threadId: latestDraft.gmail_thread_id,
+        }, 'REPLY DETECTION FAILED - error checking thread for replies (was silently swallowed as warn before)');
       }
     }
 
@@ -537,7 +545,15 @@ export async function runGmailSendStatusSync(): Promise<GmailSendStatusSyncResul
         }, 'synced thread messages for investor');
       } catch (syncErr) {
         const errMsg = syncErr instanceof Error ? syncErr.message : String(syncErr);
-        logger.warn({ error: errMsg, investorId: investor._id }, 'failed to sync thread messages');
+        const errCode = (syncErr as { code?: number; status?: number })?.code
+          ?? (syncErr as { code?: number; status?: number })?.status;
+        logger.error({
+          error: errMsg,
+          errorCode: errCode,
+          investorId: investor._id,
+          investorName: investor.name,
+          threadId,
+        }, 'THREAD SYNC FAILED - failed to sync thread messages (was silently swallowed as warn before)');
       }
     }
 

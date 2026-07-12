@@ -657,17 +657,40 @@ export function defineJob(agenda: Agenda): void {
 }
 
 export async function scheduleJob(agenda: Agenda): Promise<void> {
-  // Cancel any existing scheduled job to ensure clean reschedule
-  await agenda.cancel({ name: JOB_NAME, repeatInterval: { $exists: true } });
+  // Read env vars at schedule time (not module load time) to pick up Railway changes
+  const followup1TestMinutes = process.env['FOLLOWUP_1_TEST_MINUTES']
+    ? parseInt(process.env['FOLLOWUP_1_TEST_MINUTES'], 10)
+    : null;
+  const followup2TestMinutes = process.env['FOLLOWUP_2_TEST_MINUTES']
+    ? parseInt(process.env['FOLLOWUP_2_TEST_MINUTES'], 10)
+    : null;
+  const isTestMode = followup1TestMinutes !== null || followup2TestMinutes !== null;
 
-  // In test mode (minute thresholds), run every minute; in production, run once daily
-  const isTestMode = FOLLOWUP_1_TEST_MINUTES !== null || FOLLOWUP_2_TEST_MINUTES !== null;
+  logger.info(`[followup-scheduler] startup config: FOLLOWUP_1_TEST_MINUTES=${followup1TestMinutes}, FOLLOWUP_2_TEST_MINUTES=${followup2TestMinutes}, isTestMode=${isTestMode}`);
 
-  if (isTestMode) {
-    await agenda.every('1 minute', JOB_NAME);
-    logger.info('scheduled investor follow-up scheduler job every 1 minute (TEST MODE)');
+  // Cancel ALL existing jobs with this name (scheduled or not) to ensure clean state
+  const cancelledCount = await agenda.cancel({ name: JOB_NAME });
+  logger.info(`[followup-scheduler] cancelled ${cancelledCount} existing job(s)`);
+
+  // Schedule fresh
+  const repeatInterval = isTestMode ? '1 minute' : '0 8 * * *';
+  const options = isTestMode ? {} : { timezone: 'Europe/Prague' };
+  await agenda.every(repeatInterval, JOB_NAME, {}, options);
+
+  // Fetch the newly created job to log its nextRunAt
+  const db = agenda._mdb;
+  if (db) {
+    const job = await db.collection('os_agenda_jobs').findOne({
+      name: JOB_NAME,
+      repeatInterval: { $exists: true },
+    });
+    if (job) {
+      const nextRunAt = job['nextRunAt'];
+      logger.info(`[followup-scheduler] scheduled: interval="${repeatInterval}", nextRunAt=${nextRunAt instanceof Date ? nextRunAt.toISOString() : nextRunAt}`);
+    } else {
+      logger.warn(`[followup-scheduler] job scheduled but not found in DB immediately after creation`);
+    }
   } else {
-    await agenda.every('0 8 * * *', JOB_NAME, {}, { timezone: 'Europe/Prague' });
-    logger.info('scheduled investor follow-up scheduler job for 08:00 Europe/Prague daily');
+    logger.info(`[followup-scheduler] scheduled: interval="${repeatInterval}" (DB not accessible for nextRunAt log)`);
   }
 }
