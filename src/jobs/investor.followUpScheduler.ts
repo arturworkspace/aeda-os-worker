@@ -657,6 +657,14 @@ export function defineJob(agenda: Agenda): void {
 }
 
 export async function scheduleJob(agenda: Agenda): Promise<void> {
-  await agenda.every('0 8 * * *', JOB_NAME, {}, { timezone: 'Europe/Prague' });
-  logger.info('scheduled investor follow-up scheduler job for 08:00 Europe/Prague daily');
+  // In test mode (minute thresholds), run every minute; in production, run once daily
+  const isTestMode = FOLLOWUP_1_TEST_MINUTES !== null || FOLLOWUP_2_TEST_MINUTES !== null;
+
+  if (isTestMode) {
+    await agenda.every('1 minute', JOB_NAME);
+    logger.info('scheduled investor follow-up scheduler job every 1 minute (TEST MODE)');
+  } else {
+    await agenda.every('0 8 * * *', JOB_NAME, {}, { timezone: 'Europe/Prague' });
+    logger.info('scheduled investor follow-up scheduler job for 08:00 Europe/Prague daily');
+  }
 }
