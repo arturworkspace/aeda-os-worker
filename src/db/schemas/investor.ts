@@ -47,6 +47,7 @@ export interface IInvestor {
   outreachPaused?: boolean;
   outreachPausedAt?: Date;
   outreachPausedBy?: string;
+  testOverrideEmail?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -115,6 +116,7 @@ const investorSchema = new Schema<IInvestor>(
     outreachPaused: { type: Boolean, default: false },
     outreachPausedAt: { type: Date, required: false },
     outreachPausedBy: { type: String, required: false },
+    testOverrideEmail: { type: String, required: false, default: null },
   },
   {
     collection: 'investors',

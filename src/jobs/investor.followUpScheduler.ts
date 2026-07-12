@@ -283,10 +283,13 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
           continue; // Skip this investor, move to next
         }
 
+        // Determine recipient: testOverrideEmail takes precedence for test mode
+        const recipientEmail = investor.testOverrideEmail || investor.email;
+
         // Create draft in os_email_drafts
         const emailDraft = await emailDraftRepo.create({
           drafted_by_agent: 'julia',
-          to: investor.email,
+          to: recipientEmail,
           subject: draftContent.subject,
           body: draftContent.body,
           thread_context: `Follow-up 1 for ${investor.name} (${investor.firm})`,
@@ -331,13 +334,13 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
         await inboxItem.save();
 
         // Push to Julia's Gmail drafts if configured (best-effort, non-blocking)
-        if (isJuliaGmailConfigured() && investor.email) {
+        if (isJuliaGmailConfigured() && recipientEmail) {
           try {
             // Use first_email's threadId and rfc822MessageId for proper Gmail threading
             const threadId = firstEmailDraft?.gmail_thread_id ?? undefined;
             const inReplyToMessageId = firstEmailDraft?.gmail_rfc822_message_id ?? undefined;
             const gmailResult = await juliaCreateDraft(
-              investor.email,
+              recipientEmail,
               draftContent.subject,
               draftContent.body,
               threadId || inReplyToMessageId ? { threadId, inReplyToMessageId } : undefined
@@ -515,10 +518,13 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
           continue; // Skip this investor, move to next
         }
 
+        // Determine recipient: testOverrideEmail takes precedence for test mode
+        const recipientEmail2 = investor.testOverrideEmail || investor.email;
+
         // Create draft in os_email_drafts
         const emailDraft = await emailDraftRepo.create({
           drafted_by_agent: 'julia',
-          to: investor.email,
+          to: recipientEmail2,
           subject: draftContent.subject,
           body: draftContent.body,
           thread_context: `Follow-up 2 (final) for ${investor.name} (${investor.firm})`,
@@ -563,13 +569,13 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
         await inboxItem2.save();
 
         // Push to Julia's Gmail drafts if configured (best-effort, non-blocking)
-        if (isJuliaGmailConfigured() && investor.email) {
+        if (isJuliaGmailConfigured() && recipientEmail2) {
           try {
             // Use followup1's threadId and rfc822MessageId to continue the thread chain (fall back to first_email's)
             const threadId = followup1Draft?.gmail_thread_id ?? firstEmailDraft?.gmail_thread_id ?? undefined;
             const inReplyToMessageId = followup1Draft?.gmail_rfc822_message_id ?? firstEmailDraft?.gmail_rfc822_message_id ?? undefined;
             const gmailResult = await juliaCreateDraft(
-              investor.email,
+              recipientEmail2,
               draftContent.subject,
               draftContent.body,
               threadId || inReplyToMessageId ? { threadId, inReplyToMessageId } : undefined

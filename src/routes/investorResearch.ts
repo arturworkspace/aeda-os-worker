@@ -1157,10 +1157,12 @@ CONTACT:
     }
 
     // Test mode: override recipient with test email address
-    const toEmail = testModeEmail || realEmail;
-    const isTestMode = !!testModeEmail;
+    // Priority: 1) explicit testModeEmail param, 2) investor.testOverrideEmail field, 3) realEmail
+    const effectiveTestEmail = testModeEmail || investor.testOverrideEmail || null;
+    const toEmail = effectiveTestEmail || realEmail;
+    const isTestMode = !!effectiveTestEmail;
     if (isTestMode) {
-      logger.info({ investorId, investorName: investor.name, testModeEmail }, 'TEST MODE: redirecting draft to test address');
+      logger.info({ investorId, investorName: investor.name, testOverrideEmail: effectiveTestEmail, realEmail }, 'TEST MODE: redirecting draft to test address');
     }
 
     // Validate no forbidden placeholders BEFORE saving draft
