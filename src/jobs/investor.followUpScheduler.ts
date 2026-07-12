@@ -657,6 +657,9 @@ export function defineJob(agenda: Agenda): void {
 }
 
 export async function scheduleJob(agenda: Agenda): Promise<void> {
+  // Cancel any existing scheduled job to ensure clean reschedule
+  await agenda.cancel({ name: JOB_NAME, repeatInterval: { $exists: true } });
+
   // In test mode (minute thresholds), run every minute; in production, run once daily
   const isTestMode = FOLLOWUP_1_TEST_MINUTES !== null || FOLLOWUP_2_TEST_MINUTES !== null;
 
