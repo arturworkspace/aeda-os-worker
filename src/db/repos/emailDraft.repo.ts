@@ -48,6 +48,69 @@ export const emailDraftRepo = {
     return doc.save();
   },
 
+  /**
+   * Atomically create a first_email draft only if one doesn't already exist.
+   * Returns { created: true, draft } if newly created, { created: false, draft } if exists.
+   * Uses findOneAndUpdate with upsert to prevent race conditions.
+   */
+  async createFirstEmailIfNotExists(
+    input: CreateEmailDraftInput
+  ): Promise<{ created: boolean; draft: IEmailDraftDocument }> {
+    if (!input.investorId || input.draftType !== 'first_email') {
+      throw new Error('createFirstEmailIfNotExists requires investorId and draftType=first_email');
+    }
+
+    // First check if a draft already exists
+    const existingDraft = await EmailDraft.findOne({
+      investorId: input.investorId,
+      draftType: 'first_email',
+      status: { $ne: 'sent' },
+    }).exec();
+
+    if (existingDraft) {
+      return { created: false, draft: existingDraft };
+    }
+
+    // Try to create a new draft - the unique partial index will prevent duplicates
+    try {
+      const doc = new EmailDraft({
+        inbox_item_id: input.inbox_item_id ?? null,
+        drafted_by_agent: input.drafted_by_agent,
+        to: input.to,
+        subject: input.subject,
+        body: input.body,
+        thread_context: input.thread_context ?? '',
+        status: 'pending',
+        created_at: new Date(),
+        investorId: input.investorId,
+        draftType: input.draftType,
+        subjectOptions: input.subjectOptions,
+        personalizationReasoning: input.personalizationReasoning,
+        qualityScore: input.qualityScore,
+        contactConfidence: input.contactConfidence,
+        complianceFlags: input.complianceFlags,
+        isTestMode: input.isTestMode,
+        realRecipient: input.realRecipient,
+      });
+      const draft = await doc.save();
+      return { created: true, draft };
+    } catch (err: unknown) {
+      // E11000 duplicate key error = another request just created this draft
+      const mongoErr = err as { code?: number };
+      if (mongoErr.code === 11000) {
+        const draft = await EmailDraft.findOne({
+          investorId: input.investorId,
+          draftType: 'first_email',
+          status: { $ne: 'sent' },
+        }).exec();
+        if (draft) {
+          return { created: false, draft };
+        }
+      }
+      throw err;
+    }
+  },
+
   async findByInvestorAndStage(
     investorId: Types.ObjectId | string,
     followUpStage: 'followup1' | 'followup2'

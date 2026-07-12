@@ -1210,19 +1210,8 @@ CONTACT:
       return;
     }
 
-    // Idempotency guard: check if a non-sent draft already exists for this investor
-    // This prevents duplicate drafts when multiple requests arrive before the first one completes
-    const existingDraft = await emailDraftRepo.findByInvestorAndDraftType(investorObjId, 'first_email');
-    if (existingDraft && existingDraft.status !== 'sent') {
-      logger.info(
-        { investorId, existingDraftId: existingDraft._id.toString() },
-        'first-email draft already exists for this investor, skipping duplicate creation'
-      );
-      return;
-    }
-
-    // Save draft (with compliance flags if any were found)
-    const emailDraft = await emailDraftRepo.create({
+    // Atomically create draft if one doesn't already exist (prevents race conditions)
+    const { created, draft: emailDraft } = await emailDraftRepo.createFirstEmailIfNotExists({
       drafted_by_agent: 'julia',
       to: toEmail,
       subject: draftSubject,
@@ -1237,6 +1226,14 @@ CONTACT:
       ...(complianceResult.flags.length > 0 ? { complianceFlags: complianceResult.flags } : {}),
       ...(isTestMode ? { isTestMode: true, realRecipient: realEmail } : {}),
     });
+
+    if (!created) {
+      logger.info(
+        { investorId, existingDraftId: emailDraft._id.toString() },
+        'first-email draft already exists for this investor, skipping duplicate creation'
+      );
+      return;
+    }
 
     // Create InboxItem so draft appears in Julia's inbox
     const testModePrefix = isTestMode ? '🧪 [TEST] ' : '';
