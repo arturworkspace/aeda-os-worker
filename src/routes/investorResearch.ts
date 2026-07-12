@@ -1286,34 +1286,12 @@ CONTACT:
     });
     await inboxItem.save();
 
-    // Push draft to Julia's Gmail account (best-effort, non-blocking)
-    if (isJuliaGmailConfigured() && toEmail) {
-      try {
-        const gmailResult = await juliaCreateDraft(
-          toEmail,
-          parsedDraft.subjectOptions[0] || 'Introduction from aeda',
-          parsedDraft.body
-        );
-        // Update the email draft with Gmail IDs (including threadId and rfc822MessageId for follow-up linking)
-        await emailDraftRepo.updateGmailInfo(
-          emailDraft._id as Types.ObjectId,
-          gmailResult.draftId,
-          gmailResult.messageId,
-          gmailResult.threadId,
-          gmailResult.rfc822MessageId
-        );
-        logger.info(
-          { investorId, gmailDraftId: gmailResult.draftId },
-          'first-email draft pushed to julia gmail'
-        );
-      } catch (gmailErr) {
-        const gmailErrMsg = gmailErr instanceof Error ? gmailErr.message : String(gmailErr);
-        logger.error(
-          { error: gmailErrMsg, investorId },
-          'failed to push first-email draft to julia gmail (continuing without gmail)'
-        );
-      }
-    }
+    // NOTE: Draft stays in 'pending' status until user explicitly clicks "Push to Gmail"
+    // This allows review/editing in the app before the draft appears in Gmail
+    logger.info(
+      { investorId, draftId: emailDraft._id },
+      'first-email draft created in pending status (not yet pushed to gmail)'
+    );
 
     await writeAuditEvent({
       actor: 'julia',
