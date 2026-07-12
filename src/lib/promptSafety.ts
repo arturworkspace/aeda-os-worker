@@ -12,8 +12,10 @@
  * or before it appears in an outbound email. */
 export function sanitizeForPrompt(value: string, maxLength = 200): string {
   return value
-    .replace(/[\x00-\x1F\x7F‎‏‪-‮]/g, '') // control chars + RTL/LTR overrides
-    .replace(/\n+/g, ' ')
+    .replace(/[\r\n\t]+/g, ' ') // normalize line breaks/tabs to spaces FIRST, so tokens on
+    // either side don't get glued together once control chars below are stripped to nothing
+    .replace(/[\x00-\x1F\x7F‎‏‪-‮]/g, '') // strip remaining control chars + RTL/LTR overrides
+    .replace(/\s+/g, ' ') // collapse any resulting multi-space runs
     .trim()
     .slice(0, maxLength);
 }
