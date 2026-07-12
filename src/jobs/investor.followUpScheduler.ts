@@ -9,7 +9,7 @@ import { writeAuditEvent } from '../core/auditLog.js';
 import { isJuliaGmailConfigured, juliaCreateDraft } from '../services/juliaGmail.js';
 import { logger } from '../logger.js';
 import { validateOutputCompliance } from '../lib/promptSafety.js';
-import { extractFirstName, buildReplySubject, renderFollowUp1Body, renderFollowUp2Body } from '../lib/outreachTemplates.js';
+import { extractFirstNameFromGreeting, buildReplySubject, renderFollowUp1Body, renderFollowUp2Body } from '../lib/outreachTemplates.js';
 
 export const JOB_NAME = 'investor.followUpScheduler';
 
@@ -172,7 +172,10 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
         // commit 429a326: the template is fixed except for the greeting name, so paying for a
         // full Sonnet generation to reproduce a static string was pure overhead with non-zero
         // drift risk. See src/lib/outreachTemplates.ts.
-        const firstName = extractFirstName(investor.name);
+        // investor.name is the FIRM name in this schema (e.g. "Lightspeed"), not a person's
+        // name — pull the real contact first name back out of the first-email draft's own
+        // greeting line instead (see extractFirstNameFromGreeting doc comment).
+        const firstName = extractFirstNameFromGreeting(firstEmailDraft?.body);
         const draftContent: DraftResponse = {
           subject: buildReplySubject(firstEmailDraft?.subject),
           body: renderFollowUp1Body(firstName),
@@ -423,7 +426,9 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
         // commit 429a326: the template is fixed except for the greeting name, so paying for a
         // full Sonnet generation to reproduce a static string was pure overhead with non-zero
         // drift risk. See src/lib/outreachTemplates.ts.
-        const firstName2 = extractFirstName(investor.name);
+        // Same fix as follow-up 1 — real contact name lives in the first-email draft's
+        // greeting, not on investor.name (which is the firm name).
+        const firstName2 = extractFirstNameFromGreeting(firstEmailDraft?.body);
         const draftContent: DraftResponse = {
           subject: buildReplySubject(firstEmailDraft?.subject),
           body: renderFollowUp2Body(firstName2),

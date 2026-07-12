@@ -31,6 +31,20 @@ function renderGreeting(firstName: string | null): string {
   return firstName ? `Hi ${firstName},` : 'Hi,';
 }
 
+/** Extract the contact's first name from the already-sent first-email draft's own greeting
+ * line ("Hi Ravi,"). This is the correct source for follow-up personalization — investor.name
+ * in this schema holds the FIRM name (e.g. "Lightspeed"), not a person's name. The contact's
+ * real first name is only ever resolved by the cold-email research step and lives in that
+ * draft's rendered body, so follow-ups parse it back out rather than re-deriving it. */
+export function extractFirstNameFromGreeting(body?: string | null): string | null {
+  if (!body) return null;
+  const match = sanitizeForPrompt(body, 4000).match(/^Hi\s+([A-Za-zÀ-ÖØ-öø-ÿ'-]+),/);
+  if (!match) return null;
+  const first = match[1];
+  if (!first || first.length < 2 || first.length > 40) return null;
+  return first;
+}
+
 /** Build a reply subject from the original first-email subject, avoiding "Re: Re:" doubling.
  * Falls back to a generic subject if no original is available (should be rare — follow-ups
  * always fire off an existing first-email draft, but stay defensive). */
