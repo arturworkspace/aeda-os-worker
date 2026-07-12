@@ -41,16 +41,16 @@ const FOLLOW_UP_2_BUSINESS_DAYS = 7;
 
 const FOLLOW_UP_POSITIONING_GUARDRAILS = `
 CRITICAL — GEOGRAPHIC POSITIONING:
-Never name Armenia specifically in the email. aeda's positioning is the broader EU/US <> Eastern Europe & Central Asia (EECA) corridor, not a single country. Do not say "EU-Armenia corridor," "EUR-AMD," or reference Armenia by name.
+Never name Armenia specifically in the email. aeda's positioning is the broader EU/US <> Eastern Europe & Central Asia (EECA) corridor, not a single country. Do not say "EU-Armenia corridor," "EUR-AMD," or reference Armenia by name. Always say "EU/US–EECA corridor" or "Eastern Europe and Central Asia."
 
-CRITICAL — COMPANY DESCRIPTION (if needed):
-Describe aeda only as "cross-border payment infrastructure built on stablecoin rails and blockchain for individuals and businesses" — never name specific stablecoins (EURC, USDC, etc.).
+CRITICAL — COMPANY DESCRIPTION:
+Describe aeda as a routing and connectivity layer that connects licensed financial partners and user-controlled wallets, enabling digital money to move through more efficient cross-border rails. Never name specific stablecoins (EURC, USDC, etc.), and never say "VASP," "MiCA," or "GENIUS Act" — if regulation needs mentioning, say "regulation" generically. "Onchain," "blockchain," and "agentic commerce" are permitted when discussing the longer-term technology thesis (as in the approved Follow-up 2 template), but never attribute custody, fund holding, or direct money transmission to aeda — aeda connects and routes; licensed partners execute the regulated transfer.
 
-CRITICAL — MARKET SIZE:
-If a market-size reference is used, only "$81B annual corridor" or "$81B market" — no other figure.
+CRITICAL — POSITIONING VS OTHER PLAYERS:
+aeda complements banks and fintechs rather than competing with them. Never frame this as displacing or beating a named competitor.
 
-CRITICAL — FINANCIAL FIGURES:
-For any specific financial metric (burn rate, cash position, runway months, revenue, funding target amount, traction numbers), you MUST use the exact placeholder text "[PENDING FINANCIAL UPDATE]" instead of inventing or inferring a number.
+CRITICAL — MARKET SIZE AND TRACTION FIGURES (use exactly, do not alter or invent others):
+$81B annual corridor, growing 11% a year. MVP completed. Service partnerships signed. 200+ person waitlist. $75K bootstrapped. $500K pre-seed round. If a number is needed beyond this approved list, use the exact placeholder text "[PENDING FINANCIAL UPDATE]" instead of inventing or inferring one.
 `.trim();
 
 // Test mode: env vars to use minute-based thresholds instead of business days
@@ -209,23 +209,37 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
               role: 'user',
               content: `Draft a follow-up 1 email for investor outreach. This is the first follow-up, sent 5 business days after the initial email.
 
+This follows an approved, fixed template (final-approved by the founder — do not deviate from its structure, claims, or tone). Personalize only the greeting name; every other sentence should closely match the reference text below, near word-for-word.
+
 Investor: ${investor.name}
 Firm: ${investor.firm || 'Unknown'}
 Type: ${investor.type}
 Notes: ${investor.notes || 'None'}${firstEmailContext}
 
-Rules:
-- Write as Artur (CEO), first person
-- Keep it brief (under 100 words)
-- Reference the initial email naturally (you have it above for context)
-- Add one small new data point if possible
-- Professional but warm
-- If the contact's first name is not known or not provided, use a generic greeting like "Hi," or "Hi there," — NEVER output a bracketed placeholder token like "[First Name]" or similar in the final email text
-- End with signature block (blank line before it):
+REFERENCE TEMPLATE:
 
-Best Regards
+Hi [Name],
+
+A quick follow-up with the simplest way to think about aeda.
+
+Most cross-border products improve the customer interface while continuing to rely on the same underlying correspondent infrastructure. aeda addresses the infrastructure gap.
+
+Our routing layer connects licensed partners and identifies more efficient paths across fragmented markets. For individuals, that can mean lower costs and shorter waiting times. For businesses, more reliable cross-border flows. For financial institutions, access to new corridors without rebuilding the infrastructure themselves.
+
+Would a short call this week be useful?
+
+Best,
 Julia Maklakova
-Fundraising manager
+Fundraising Manager
+
+Rules:
+- Use the investor's first name if known, otherwise "Hi,". NEVER output a bracketed placeholder token like "[First Name]" or "[Name]" in the final email text.
+- Keep the body text unchanged from the template above — this is an approved, founder-signed-off template, not a fresh draft. Do not add new data points or rewrite sentences.
+- Signature is always exactly (blank line before it):
+
+Best,
+Julia Maklakova
+Fundraising Manager
 
 Return JSON: {"subject": "Re: ...", "body": "..."}`,
             },
@@ -444,28 +458,46 @@ Return JSON: {"subject": "Re: ...", "body": "..."}`,
               role: 'user',
               content: `Draft a follow-up 2 email for investor outreach. This is the final follow-up, sent 7 business days after follow-up 1.
 
+This follows an approved, fixed template (final-approved by the founder — do not deviate from its structure, claims, or tone). Personalize only the greeting name; every other sentence should closely match the reference text below, near word-for-word.
+
 Investor: ${investor.name}
 Firm: ${investor.firm || 'Unknown'}
 Type: ${investor.type}
 Notes: ${investor.notes || 'None'}${firstEmailContext}
 
-Rules:
-- Write as Artur (CEO), first person
-- Keep it very brief (under 75 words)
-- This is a final check-in, respect their time
-- Offer to close the loop if not a fit (this is intentionally different from the first-email CTA — it's a graceful exit)
-- Professional and gracious
-- If the contact's first name is not known or not provided, use a generic greeting like "Hi," or "Hi there," — NEVER output a bracketed placeholder token like "[First Name]" or similar in the final email text
-- End with signature block (blank line before it):
+REFERENCE TEMPLATE:
 
-Best Regards
+Hi [Name],
+
+One final note on the broader opportunity behind aeda.
+
+The immediate problem is clear: an $81B corridor remains underserved because it still depends on correspondent banking infrastructure built in the 1970s — SWIFT rails that are slow, costly, and fragmented. The longer-term opportunity is larger.
+
+As onchain settlement, programmable money, and agentic commerce develop, more transactions will be initiated by platforms and software rather than manually by individuals. These transactions will require infrastructure that can route value securely, intelligently, and continuously across markets.
+
+aeda is building that routing layer — starting with today's cross-border payment gap and designed for the next generation of digital commerce.
+
+We have completed the MVP, signed service partnerships, built a 200+ person waitlist, and bootstrapped $75K. We are raising a $500K pre-seed round.
+
+Happy to send the deck or walk you through the model in a short call.
+
+Best,
 Julia Maklakova
-Fundraising manager
+Fundraising Manager
+
+Rules:
+- Use the investor's first name if known, otherwise "Hi,". NEVER output a bracketed placeholder token like "[First Name]" or "[Name]" in the final email text.
+- Keep the body text unchanged from the template above — this is an approved, founder-signed-off template, not a fresh draft. Do not shorten it into a graceful-exit note; it is the bold closing email, not a check-in.
+- Signature is always exactly (blank line before it):
+
+Best,
+Julia Maklakova
+Fundraising Manager
 
 Return JSON: {"subject": "Re: ...", "body": "..."}`,
             },
           ],
-          maxTokens: 300,
+          maxTokens: 450,
         });
 
         totalCostUsd += result.costUsd;

@@ -787,69 +787,65 @@ async function processBulkResearch(
 // FIRST-OUTREACH EMAIL DRAFTING
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const FIRST_EMAIL_DRAFTING_SYSTEM = `You are drafting a cold email to a VC investor on behalf of Artur, CEO of aeda. The goal is a short, natural email that sounds like a human founder wrote it, not like an AI or a pitch deck.
+const FIRST_EMAIL_DRAFTING_SYSTEM = `You are drafting a cold email to a VC investor on behalf of Julia, Fundraising Manager at aeda, writing for founder Artur Kartshikyan.
 
-VOICE — Write like Artur actually writes:
-- Short sentences. Direct. Slightly informal business English.
-- Non-native speaker cadence is fine. Not polished corporate English.
-- No AI-tell phrases. BANNED: "genuine appetite", "tailwinds", "compelling", "signals", "positions them uniquely", "directly aligns with", "resonates deeply", "excited to", "seamless", "unlock", "elevate", em-dashes used for dramatic effect.
-- No recipient-flattery openers. The entire pattern of "Your [work/investment/thesis] on X [caught my eye/impressed me/etc.]" is forbidden — any wording that frames the opener as your personal reaction to the recipient's work. Open with facts, not flattery.
-- No setup paragraphs like "Two tailwinds make this moment compelling..." — get to the point.
-- Not textbook-perfect grammar, but not broken either.
+This email follows an approved, fixed template (final-approved by the founder — do not deviate from its structure, claims, numbers, or tone). Personalize only the greeting name and firm name; every other sentence should closely match the reference text below, near word-for-word.
 
-LENGTH — 80-100 WORDS (HARD CEILING):
-This is a cold email a busy VC partner would actually read in full. Shorter is better, but you have room for one "why now" clause if it adds value. The 100-word limit is absolute — emails over 100 words will be rejected and regenerated.
+REFERENCE TEMPLATE:
 
-OUTPUT — FINAL EMAIL ONLY:
-Return ONLY the finished email text. Never include meta-commentary, self-correction, visible thinking, or narration about your writing process. No "sorry," no "let me be direct," no commenting on your own phrasing. The output must be ready to send as-is.
+Hi [Name],
 
-PERSONALIZATION — Ground it in their actual research:
-Look at the "Best Outreach Angle" field. That's the specific hook for THIS investor. Reference something real and verifiable about their firm, portfolio, or thesis. Not generic "you invest in fintech" — something specific only to them.
+I reviewed [Firm]'s portfolio and thought aeda could be relevant to your investment focus.
 
-If the research mentions a specific portfolio company, partner name, or recent deal that connects to aeda's space, use it. If not, use their stated thesis or geographic focus.
+The EU/US–EECA corridor represents approximately $81B in annual money movement and is growing by 11% a year. Yet it remains fragmented and heavily dependent on correspondent banking, resulting in slow settlement, high costs, and limited market coverage.
 
-STRUCTURE — Four parts (fact-first, no recipient flattery):
+aeda is building the routing and connectivity layer for this corridor. We connect licensed financial partners and user-controlled wallets, enabling digital money to move through more efficient cross-border rails.
 
-1. OPENER — Direct factual statement, NOT personal reaction to recipient's work.
-   FORBIDDEN PATTERN: "Your work on X..." / "Your investment in X..." / "I was impressed by your..." / Any framing where you describe YOUR reaction to THEIR work. This entire pattern is out, regardless of exact wording.
-   ALLOWED: Either (a) a direct factual observation about their portfolio stated as fact ("a16z crypto led LayerZero's $75M round — cross-chain and cross-border are the same infra problem"), or (b) open with the problem aeda solves stated plainly.
-   The opener should state facts, then connect to aeda. No throat-clearing, no flattery setup.
+We complement banks and fintechs rather than compete with them.
 
-2. WHAT AEDA IS — One concrete sentence: "aeda is building cross-border payment infrastructure on stablecoin rails for the EU/EECA corridor." No metaphors-as-openers, no abstractions.
+In under a year, we completed the MVP, signed service partnerships, built a 200+ person waitlist, and bootstrapped $75K. We are now raising a $500K pre-seed round.
 
-3. WHY NOW — One clause or sentence: the regulatory/market timing point (MiCA live in EU, corridor underserved, etc.) stated as fact. Skip if it doesn't add value for this specific investor.
-
-4. THE ASK — "We're raising our pre-seed. Open to the deck?" or similar low-friction CTA.
-
-GREETING:
-Use first name if known from research contact info. Otherwise just "Hi," — never brackets like "[First Name]".
-
-SIGNATURE:
-End with exactly this (blank line before):
+Would you be open to a 20-minute conversation, or would it be more useful if I sent the deck first?
 
 Best,
-Julia
+Julia Maklakova
+Fundraising Manager
 
-CTA:
-The last line before signature should be a specific ask: deck, call, or intro request. Keep it low-friction.
+PERSONALIZATION RULES:
+- Use the investor's first name if known from research contact info. Otherwise "Hi,".
+- Use the firm/fund name in the opener if known ("I reviewed [Firm]'s portfolio..."). If no firm name is available, drop that clause and open directly with the corridor paragraph ("The EU/US–EECA corridor represents...").
+- Do NOT name a specific portfolio company, deal, or partner, and do NOT fabricate any claim of having researched a specific investment of theirs. The opener stays general ("relevant to your investment focus") — this is a deliberate compliance/tone choice, not a gap to fill in.
+- You may lightly adapt "your investment focus" to their known stage/sector focus if that information is in the research (e.g. "your fintech thesis," "your infrastructure focus") — but never reference a named deal.
 
-CRITICAL RULES:
-- Never name Armenia specifically. Say "EU/EECA corridor" or "Eastern Europe" if geography needed.
-- Never name specific stablecoins (EURC, USDC).
-- For any financial figure (revenue, burn, runway, etc.), use "[PENDING FINANCIAL UPDATE]" placeholder.
+FIGURES — DO NOT ALTER:
+Keep these exact: $81B annual corridor, 11% growth a year, MVP completed, service partnerships signed, 200+ person waitlist, $75K bootstrapped, $500K pre-seed round. Never invent additional financial figures. If asked to add a number not in this list, use "[PENDING FINANCIAL UPDATE]" instead.
+
+CRITICAL COMPLIANCE RULES:
+- Never name Armenia specifically. Say "EU/US–EECA corridor" or "Eastern Europe and Central Asia" if geography needs restating.
+- Never name specific stablecoins (EURC, USDC), and never say "VASP", "MiCA", or "GENIUS Act" — if regulation needs mentioning, say "regulation" generically.
+- Never say "we send money", "we transfer funds", "payment provider", "payment processor", "wallet provider" (unqualified), or attribute a fee/exchange rate to aeda as if it comes from the user. aeda connects and routes; licensed partners execute the regulated transfer.
 - Always lowercase "aeda".
+
+SIGNATURE — end with exactly this (blank line before):
+
+Best,
+Julia Maklakova
+Fundraising Manager
 
 SUBJECT LINES — 3 options:
 - Under 50 characters each
-- At least one must reference something specific to this investor
-- No buzzwords, no numbers-as-hype, no "Quick intro" generic templates
+- No buzzwords, no hype, no "Quick intro" generic templates
+- At least one should reference the corridor/problem directly (e.g. "The $81B corridor still running on 1970s rails")
 - Sound like a human wrote it, not a sales automation tool
+
+OUTPUT — FINAL EMAIL ONLY:
+Return ONLY the finished email text in the body field. No meta-commentary, no self-correction, no narration about your writing process.
 
 Return JSON:
 {
   "subjectOptions": ["Subject 1", "Subject 2", "Subject 3"],
   "body": "The email body...",
-  "personalizationReasoning": "One sentence: what specific research fact drove the angle"
+  "personalizationReasoning": "One sentence: what general thesis/stage/geography fit was used, without naming a specific portfolio company"
 }`;
 
 interface FirstEmailDraftOutput {
@@ -890,17 +886,18 @@ async function scoreEmailPersonalizationQuality(
   const response = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 256,
-    system: `You are an email quality reviewer. Score the personalization quality of this investor outreach email on a scale of 1-10.
+    system: `You are an email quality reviewer. This company uses a fixed, founder-approved cold-email template (deliberately generic opener — no named portfolio companies or deals, by design). Score whether THIS draft correctly matches that approved template, on a scale of 1-10.
 
 A high score (8-10) means:
-- The email references specific, verifiable facts about the investor (portfolio companies, thesis, recent deals)
-- The connection to aeda is clearly articulated based on these facts
-- It does NOT use generic phrases like "I noticed you invest in fintech" without specifics
+- The firm name (or "Hi," + no firm clause, if no firm was known) is correctly substituted into the opener
+- The corridor stats, positioning ("routing and connectivity layer", "complement... rather than compete"), and traction figures ($81B, 11%, MVP, partnerships, 200+ waitlist, $75K, $500K) all match the reference template unchanged
+- The signature is exactly "Julia Maklakova / Fundraising Manager"
+- It does NOT name a specific portfolio company, deal, or partner (that would be a deviation from the approved template, not an improvement)
 
 A low score (1-4) means:
-- Generic template language with no investor-specific details
-- Vague claims of "fit" without evidence
-- Could be sent to any investor without changes
+- Deviates from the template structure, invents new claims or figures, alters the traction numbers, or fabricates a specific portfolio-company reference
+- Wrong or missing name/firm substitution
+- Wrong or missing signature
 
 Return JSON: {"score": <1-10>, "reasoning": "<one sentence explanation>"}`,
     messages: [{
@@ -1034,8 +1031,8 @@ CONTACT:
       return;
     }
 
-    // Word count validation with retry (hard ceiling of 100 words)
-    const MAX_WORD_COUNT = 100;
+    // Word count validation with retry (hard ceiling — approved template is ~150 words)
+    const MAX_WORD_COUNT = 180;
     const MAX_WORD_COUNT_RETRIES = 2;
     let wordCountRetries = 0;
     let wordCount = parsedDraft.body.split(/\s+/).filter(Boolean).length;
