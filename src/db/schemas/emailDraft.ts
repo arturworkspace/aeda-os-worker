@@ -96,13 +96,14 @@ emailDraftSchema.index({ status: 1 });
 emailDraftSchema.index({ drafted_by_agent: 1 });
 emailDraftSchema.index({ investorId: 1, followUpStage: 1 });
 // Partial unique index: only one non-sent first_email draft per investor
+// Note: MongoDB partial indexes don't support $ne, so we use $in with explicit statuses
 emailDraftSchema.index(
   { investorId: 1, draftType: 1 },
   {
     unique: true,
     partialFilterExpression: {
       draftType: 'first_email',
-      status: { $ne: 'sent' },
+      status: { $in: ['pending', 'pushed_to_gmail', 'rejected'] },
     },
   }
 );
