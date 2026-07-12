@@ -2308,6 +2308,93 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
     }
   });
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PUSH-DRAFT-TO-GMAIL: Push a pending draft to Julia's Gmail as a draft
+  // Used when draft was created but not yet pushed, or push initially failed
+  // ═══════════════════════════════════════════════════════════════════════════
+  router.post('/push-draft-to-gmail', async (req: Request, res: Response) => {
+    const provided = req.headers['x-trigger-secret'];
+    const expected = process.env['TRIGGER_SECRET'];
+    if (!expected || provided !== expected) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { draftId } = req.body as { draftId?: string };
+    if (!draftId || !Types.ObjectId.isValid(draftId)) {
+      res.status(400).json({ error: 'Invalid draftId' });
+      return;
+    }
+
+    try {
+      const draftObjId = new Types.ObjectId(draftId);
+      const draft = await emailDraftRepo.findById(draftObjId);
+      if (!draft) {
+        res.status(404).json({ error: 'Draft not found' });
+        return;
+      }
+
+      // Already pushed
+      if (draft.status === 'pushed_to_gmail' && draft.gmail_draft_id) {
+        res.json({
+          status: 'already_pushed',
+          draftId,
+          gmail_draft_id: draft.gmail_draft_id,
+        });
+        return;
+      }
+
+      // Already sent
+      if (draft.status === 'sent') {
+        res.json({ status: 'already_sent', draftId });
+        return;
+      }
+
+      // Check Gmail config
+      if (!isJuliaGmailConfigured()) {
+        res.status(503).json({ error: 'Julia Gmail not configured' });
+        return;
+      }
+
+      // Push to Gmail
+      const toEmail = draft.to;
+      if (!toEmail) {
+        res.status(400).json({ error: 'Draft has no recipient email' });
+        return;
+      }
+
+      const gmailResult = await juliaCreateDraft(
+        toEmail,
+        draft.subject,
+        draft.body
+      );
+
+      // Update draft with Gmail IDs
+      await emailDraftRepo.updateGmailInfo(
+        draftObjId,
+        gmailResult.draftId,
+        gmailResult.messageId,
+        gmailResult.threadId,
+        gmailResult.rfc822MessageId
+      );
+
+      logger.info(
+        { draftId, gmailDraftId: gmailResult.draftId },
+        'draft pushed to julia gmail via push-draft-to-gmail endpoint'
+      );
+
+      res.json({
+        status: 'pushed',
+        draftId,
+        gmail_draft_id: gmailResult.draftId,
+      });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      logger.error({ error: errorMsg, draftId }, 'push-draft-to-gmail failed');
+      res.status(500).json({ error: errorMsg });
+    }
+  });
+
   return router;
 }
 
