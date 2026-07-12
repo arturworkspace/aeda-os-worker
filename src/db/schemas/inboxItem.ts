@@ -110,7 +110,6 @@ const inboxItemSchema = new Schema<IInboxItem>(
   }
 );
 
-inboxItemSchema.index({ message_id: 1 }, { unique: true });
 inboxItemSchema.index({ sender_email: 1 });
 inboxItemSchema.index({ processing_status: 1 });
 inboxItemSchema.index({ received_at: -1 });
