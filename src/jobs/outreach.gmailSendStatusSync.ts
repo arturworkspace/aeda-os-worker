@@ -341,8 +341,14 @@ export async function runGmailSendStatusSync(): Promise<GmailSendStatusSyncResul
         const messages = threadResponse.data.messages || [];
 
         // Find the most recent outbound message (from julia or artur)
+        // Skip messages that are still unsent Gmail drafts (labelIds includes DRAFT and not SENT) -
+        // an unsent follow-up draft sitting in the thread must not count as "the last outbound message",
+        // otherwise a real reply sent before that draft was created gets silently missed.
         let lastOutboundDate: Date | null = null;
         for (const msg of messages) {
+          const labels = msg.labelIds || [];
+          if (labels.includes('DRAFT') && !labels.includes('SENT')) continue;
+
           const from = msg.payload?.headers?.find(h => h.name?.toLowerCase() === 'from')?.value || '';
           const isOutbound = from.includes(JULIA_EMAIL) || from.includes(ARTUR_EMAIL);
           if (isOutbound && msg.internalDate) {
@@ -357,6 +363,9 @@ export async function runGmailSendStatusSync(): Promise<GmailSendStatusSyncResul
 
         // Check for inbound replies after the last outbound
         for (const msg of messages) {
+          const labels = msg.labelIds || [];
+          if (labels.includes('DRAFT') && !labels.includes('SENT')) continue;
+
           const from = msg.payload?.headers?.find(h => h.name?.toLowerCase() === 'from')?.value || '';
           const isOutbound = from.includes(JULIA_EMAIL) || from.includes(ARTUR_EMAIL);
 
