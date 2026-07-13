@@ -72,6 +72,15 @@ const STRUCTURING_TOOL = {
   input_schema: {
     type: 'object' as const,
     properties: {
+      investorType: {
+        type: ['string', 'null'] as const,
+        enum: ['VC', 'Angel', 'Family Office', 'Corporate', 'Accelerator', null],
+        description:
+          'Classify the investor entity itself (not aeda). "VC" for institutional VC funds/micro-VCs, ' +
+          '"Angel" for an individual investing personal capital, "Family Office" for a family/private wealth ' +
+          'office, "Corporate" for a corporate venture arm (CVC) or strategic investor, "Accelerator" for ' +
+          'accelerator/incubator programs. Null only if research genuinely could not determine this.',
+      },
       thesis: {
         type: ['string', 'null'] as const,
         description: 'Investment thesis. Null if not found.',
@@ -128,7 +137,7 @@ const STRUCTURING_TOOL = {
         description: 'List of sources cited in the research.',
       },
     },
-    required: ['thesis', 'stage', 'checkSize', 'geoFocus', 'portfolioCompanies', 'recentActivity', 'contactName', 'contactEmail', 'contactConfidence', 'contactLinkedIn', 'sources'],
+    required: ['investorType', 'thesis', 'stage', 'checkSize', 'geoFocus', 'portfolioCompanies', 'recentActivity', 'contactName', 'contactEmail', 'contactConfidence', 'contactLinkedIn', 'sources'],
   },
 };
 
@@ -301,6 +310,7 @@ interface ScoringOutput {
 }
 
 interface StructuredResearchOutput {
+  investorType: 'VC' | 'Angel' | 'Family Office' | 'Corporate' | 'Accelerator' | null;
   thesis: string | null;
   stage: string | null;
   checkSize: string | null;
@@ -662,6 +672,15 @@ async function runResearchAsync(
       },
       { upsert: true }
     );
+
+    // Backfill the investor's Type field from research (per Artur: "clicking
+    // Research should also settle this" — the CRM's type filter is otherwise
+    // stuck at the Add-modal default). Only writes when research actually
+    // determined a type — never overwrites with a guess.
+    if (structuredData.investorType) {
+      await Investor.findByIdAndUpdate(investorObjId, { type: structuredData.investorType }).exec();
+      logger.info({ investorId, investorType: structuredData.investorType }, 'investor type classified from research');
+    }
 
     await writeAuditEvent({
       actor: 'system',
@@ -1484,6 +1503,7 @@ export function createInvestorResearchRouter(): Router {
       }
 
       const researchData: StructuredResearchOutput = {
+        investorType: null, // /rescore only re-runs scoring, not type classification
         thesis: existingResearch.thesis,
         stage: existingResearch.stage,
         checkSize: existingResearch.checkSize,
