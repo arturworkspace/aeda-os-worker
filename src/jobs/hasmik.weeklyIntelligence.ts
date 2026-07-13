@@ -208,8 +208,45 @@ Work through ALL of these domains every run:
    → Use category: 'influencer' for all entries from this domain
 
 10. FUNDRAISING OPPORTUNITIES
-    EU accelerators, grants, government programs
-    Be comprehensive — write every program aeda could qualify for
+
+    Track by name every cycle:
+    - EIC Accelerator (Open call only — ignore thematic Challenges that
+      don't fit fintech/payments; note next full-proposal cut-off)
+    - Eurostars/Eureka Network (flag the multi-country consortium
+      requirement explicitly if aeda has no confirmed R&D partner)
+    - EIC Pathfinder (only surface if genuinely TRL 1-4 / pre-product —
+      do not force-fit against aeda's current MVP stage)
+    - Solana Foundation Grants (solana.org/grants — rolling basis,
+      standard + convertible; aeda's settlement layer runs on Solana)
+    - Circle Developer Grants Program (check if a new cohort window has
+      opened; aeda's stablecoin rail is EURC/Circle)
+    - TAČR (Technology Agency of the Czech Republic) open calls —
+      VanCoin LLC is Czech-incorporated, check thematic scope each cycle
+    - Czech Fintech Sandbox — next cohort window, regulatory-positioning
+      value not just capital
+
+    Also derive candidates yourself each cycle by reasoning from aeda's
+    actual profile, not a generic "fintech grants" search:
+    - technology stack and partners (Solana, Circle/EURC, Bridge.xyz,
+      Sky Labs, Sumsub) — do any of THEM run grant/ecosystem-fund
+      programs aeda hasn't been checked against yet?
+    - jurisdiction (Czech Republic / EU) — national innovation agencies,
+      not only EU-level programs
+    - the actual corridor (EU/US <> Armenia/Georgia/Kazakhstan/
+      Uzbekistan) — bilateral or regional programs (e.g. EU4Business,
+      EBRD digital finance initiatives) that a pure "EU grants" search
+      won't surface
+
+    Classify every entry correctly by the existing 'type' field
+    (accelerator / grant / incubator / studio / ecosystem-fund) — do not
+    default everything to "grant".
+
+    Every entry MUST state in eligibilityReasoning: (a) whether it fits
+    aeda's actual domain — crypto/stablecoin payments infrastructure,
+    fintech, cross-border settlement — not fintech-adjacent in general,
+    and (b) aeda's current TRL/stage against the program's stated
+    requirement. Do not write an entry with isAedaEligible: true unless
+    both are explicitly justified with a source.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 WRITING STANDARDS
