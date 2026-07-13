@@ -132,6 +132,49 @@ const STRUCTURING_TOOL = {
   },
 };
 
+// Used by POST /linkedin-autofill — a quick, on-demand lookup triggered from
+// the Add Investor modal when Artur pastes a LinkedIn URL. Deliberately thin
+// (name/firm/title/geography only) — full due-diligence research still runs
+// through the existing /trigger → runResearchAsync pipeline afterward.
+const LINKEDIN_AUTOFILL_TOOL = {
+  name: 'structure_linkedin_profile',
+  description: 'Structure whatever was found about this LinkedIn profile into the required format.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      fullName: {
+        type: ['string', 'null'] as const,
+        description: 'The person\'s full name as it appears on the profile. Null if not confidently identified.',
+      },
+      firm: {
+        type: ['string', 'null'] as const,
+        description: 'Current employer / fund / firm name. Null if not found.',
+      },
+      title: {
+        type: ['string', 'null'] as const,
+        description: 'Current job title (e.g. "Partner", "Principal", "Angel Investor"). Null if not found.',
+      },
+      geography: {
+        type: ['string', 'null'] as const,
+        description: 'Location / region shown on the profile (e.g. "Berlin, Germany"). Null if not found.',
+      },
+      headline: {
+        type: ['string', 'null'] as const,
+        description: 'One-line professional headline/summary, if visible. Null if not found.',
+      },
+      confidence: {
+        type: 'string' as const,
+        enum: ['high', 'low'],
+        description:
+          '"high" only if web_search surfaced content that specifically and unambiguously matches this exact ' +
+          'LinkedIn URL (e.g. the URL itself appeared in a result, or name+title match a cited source). ' +
+          '"low" if this is a best guess, the profile wasn\'t found, or multiple people could match.',
+      },
+    },
+    required: ['fullName', 'firm', 'title', 'geography', 'headline', 'confidence'],
+  },
+};
+
 const AEDA_COMPANY_PROFILE = `aeda is a non-custodial EURC stablecoin infrastructure company for the EU/US <> Eastern Europe & Central Asia (EECA) corridor.
 Pre-seed stage startup based in Prague, Czech Republic.
 Geographic focus: EU, US, and EECA (Eastern Europe, Caucasus, Central Asia).
@@ -483,17 +526,24 @@ async function runResearchAsync(
   investorObjId: Types.ObjectId,
   investorId: string,
   investorName: string,
-  investorFirm: string
+  investorFirm: string,
+  investorLinkedinUrl?: string
 ): Promise<void> {
   const startTime = Date.now();
   let totalCostUsd = 0;
 
   try {
-    const researchQuery = investorFirm
-      ? `Research the investor "${investorName}" at "${investorFirm}" for startup investment fit assessment.`
-      : `Research the investor "${investorName}" for startup investment fit assessment.`;
+    const researchQuery = [
+      investorFirm
+        ? `Research the investor "${investorName}" at "${investorFirm}" for startup investment fit assessment.`
+        : `Research the investor "${investorName}" for startup investment fit assessment.`,
+      investorLinkedinUrl
+        ? `Their LinkedIn profile is ${investorLinkedinUrl} — use it to verify/correct the name, current firm, ` +
+          `title, and geography, and to cross-check anything else you find under this name elsewhere.`
+        : null,
+    ].filter(Boolean).join(' ');
 
-    logger.info({ investorId, investorName, investorFirm }, 'starting investor research (async)');
+    logger.info({ investorId, investorName, investorFirm, investorLinkedinUrl }, 'starting investor research (async)');
 
     const researchResponse = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
@@ -672,7 +722,7 @@ async function runResearchAsync(
 }
 
 async function processBulkResearch(
-  investors: { _id: Types.ObjectId; name: string; firm: string }[]
+  investors: { _id: Types.ObjectId; name: string; firm: string; linkedinUrl?: string | undefined }[]
 ): Promise<void> {
   const CONCURRENCY = 2;
   const startTime = Date.now();
@@ -681,7 +731,7 @@ async function processBulkResearch(
   let budgetBlocked = 0;
   let totalCostUsd = 0;
 
-  const processOne = async (inv: { _id: Types.ObjectId; name: string; firm: string }) => {
+  const processOne = async (inv: { _id: Types.ObjectId; name: string; firm: string; linkedinUrl?: string | undefined }) => {
     const investorId = inv._id.toHexString();
 
     // Check budget before each investor
@@ -726,7 +776,7 @@ async function processBulkResearch(
 
     // Run the actual research (reuses existing logic)
     try {
-      await runResearchAsync(inv._id, investorId, inv.name, inv.firm);
+      await runResearchAsync(inv._id, investorId, inv.name, inv.firm, inv.linkedinUrl);
       processed++;
       return 'done';
     } catch (err) {
@@ -1469,16 +1519,16 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
     }
 
     try {
-      const allInvestors = await Investor.find({}, { _id: 1, name: 1, firm: 1 }).lean().exec();
+      const allInvestors = await Investor.find({}, { _id: 1, name: 1, firm: 1, linkedinUrl: 1 }).lean().exec();
       const totalInvestors = allInvestors.length;
 
-      const investorsNeedingWork: { _id: Types.ObjectId; name: string; firm: string }[] = [];
+      const investorsNeedingWork: { _id: Types.ObjectId; name: string; firm: string; linkedinUrl?: string | undefined }[] = [];
 
       for (const inv of allInvestors) {
         const research = await InvestorResearch.findOne({ investorId: inv._id }).lean().exec();
         if (research?.status === 'running') continue;
         if (research?.status === 'completed' && research.relevanceScore) continue;
-        investorsNeedingWork.push({ _id: inv._id, name: inv.name, firm: inv.firm || '' });
+        investorsNeedingWork.push({ _id: inv._id, name: inv.name, firm: inv.firm || '', linkedinUrl: inv.linkedinUrl || undefined });
       }
 
       const count = investorsNeedingWork.length;
@@ -1575,7 +1625,7 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
       res.json({ status: 'running', investorId });
 
       // Fire-and-forget: run research in background
-      runResearchAsync(investorObjId, investorId, investorName, investorFirm).catch((err) => {
+      runResearchAsync(investorObjId, investorId, investorName, investorFirm, investor.linkedinUrl).catch((err) => {
         logger.error({ error: err instanceof Error ? err.message : String(err), investorId }, 'unhandled error in async research');
       });
 
@@ -1586,6 +1636,109 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
       await upsertFailed(investorObjId, errorMsg);
 
       res.status(500).json({ status: 'failed', investorId, error: errorMsg });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // LINKEDIN-AUTOFILL: Quick lookup from a pasted LinkedIn URL for the
+  // Add Investor modal. Runs synchronously (unlike /trigger) since the
+  // frontend needs the result back to populate the form. Deep validation
+  // still happens later via the normal /trigger research pass.
+  // ═══════════════════════════════════════════════════════════════════════════
+  router.post('/linkedin-autofill', async (req: Request, res: Response) => {
+    const provided = req.headers['x-trigger-secret'];
+    const expected = process.env['TRIGGER_SECRET'];
+    if (!expected || provided !== expected) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { linkedinUrl } = req.body as { linkedinUrl?: string };
+    if (!linkedinUrl || !/^https?:\/\/(www\.)?linkedin\.com\/in\//i.test(linkedinUrl.trim())) {
+      res.status(400).json({ error: 'A valid linkedin.com/in/... URL is required' });
+      return;
+    }
+    const cleanUrl = linkedinUrl.trim();
+
+    try {
+      const dayToDateCost = await costLedgerRepo.getDayToDateTotal();
+      if (dayToDateCost >= RESEARCH_DAILY_BUDGET_USD) {
+        res.status(200).json({ status: 'failed', error: 'Daily research budget cap reached — try again tomorrow or fill in manually.' });
+        return;
+      }
+
+      let totalCostUsd = 0;
+
+      const lookupResponse = await anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        system:
+          'You look up public professional profiles for aeda\'s investor CRM. Use web_search to find ' +
+          'whatever is publicly indexed about the LinkedIn profile at the given URL. Do not guess or ' +
+          'invent details — if search does not surface anything specifically matching this URL, say so.',
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        messages: [{ role: 'user', content: `Look up this LinkedIn profile and summarize whatever is publicly findable about the person: ${cleanUrl}` }],
+      });
+
+      const lookupCost = estimateCostUsd('claude-sonnet-4-6', {
+        input_tokens: lookupResponse.usage.input_tokens,
+        output_tokens: lookupResponse.usage.output_tokens,
+        cache_creation_input_tokens: (lookupResponse.usage as { cache_creation_input_tokens?: number }).cache_creation_input_tokens,
+        cache_read_input_tokens: (lookupResponse.usage as { cache_read_input_tokens?: number }).cache_read_input_tokens,
+      });
+      totalCostUsd += lookupCost;
+
+      let lookupText = '';
+      for (const block of lookupResponse.content) {
+        if (block.type === 'text') lookupText += block.text + '\n';
+      }
+
+      const structureResponse = await anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 512,
+        system: 'Extract structured data from the LinkedIn lookup findings and call structure_linkedin_profile. Use null for anything not confidently found.',
+        tools: [LINKEDIN_AUTOFILL_TOOL],
+        tool_choice: { type: 'tool', name: 'structure_linkedin_profile' },
+        messages: [{ role: 'user', content: `LinkedIn URL: ${cleanUrl}\n\nFindings:\n${lookupText || '(no content returned)'}` }],
+      });
+
+      const structureCost = estimateCostUsd('claude-haiku-4-5-20251001', {
+        input_tokens: structureResponse.usage.input_tokens,
+        output_tokens: structureResponse.usage.output_tokens,
+        cache_creation_input_tokens: (structureResponse.usage as { cache_creation_input_tokens?: number }).cache_creation_input_tokens,
+        cache_read_input_tokens: (structureResponse.usage as { cache_read_input_tokens?: number }).cache_read_input_tokens,
+      });
+      totalCostUsd += structureCost;
+
+      await costLedgerRepo.insert({
+        agentOrJob: 'investor-linkedin-autofill',
+        packageId: null,
+        projectKey: null,
+        llmModel: 'claude-sonnet-4-6+haiku-4-5',
+        inputTokens: lookupResponse.usage.input_tokens + structureResponse.usage.input_tokens,
+        outputTokens: lookupResponse.usage.output_tokens + structureResponse.usage.output_tokens,
+        costUsd: totalCostUsd,
+        estimatedMaxUsd: totalCostUsd,
+        tier: 'production',
+      });
+
+      const toolUse = structureResponse.content.find((b) => b.type === 'tool_use');
+      const data = (toolUse && 'input' in toolUse ? toolUse.input : {}) as {
+        fullName: string | null;
+        firm: string | null;
+        title: string | null;
+        geography: string | null;
+        headline: string | null;
+        confidence: 'high' | 'low';
+      };
+
+      logger.info({ linkedinUrl: cleanUrl, confidence: data.confidence, costUsd: totalCostUsd }, 'linkedin autofill completed');
+
+      res.json({ status: 'ok', linkedinUrl: cleanUrl, ...data, costUsd: totalCostUsd });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      logger.error({ error: errorMsg, linkedinUrl: cleanUrl }, 'linkedin autofill failed');
+      res.status(500).json({ status: 'failed', error: errorMsg });
     }
   });
 

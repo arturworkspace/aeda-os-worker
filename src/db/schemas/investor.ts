@@ -21,6 +21,7 @@ export interface IInvestor {
   firm: string;
   email: string;
   website: string;
+  linkedinUrl?: string;
   type: 'VC' | 'Angel' | 'Family Office' | 'Corporate' | 'Accelerator';
   stage: 'Research' | 'Outreach' | 'First Contact' | 'Meeting' | 'Term Sheet' | 'Closed' | 'Passed';
   checkSize: number;
@@ -82,6 +83,7 @@ const investorSchema = new Schema<IInvestor>(
     firm: { type: String, default: '' },
     email: { type: String, default: '' },
     website: { type: String, default: '' },
+    linkedinUrl: { type: String, default: '' },
     type: {
       type: String,
       enum: ['VC', 'Angel', 'Family Office', 'Corporate', 'Accelerator'],
