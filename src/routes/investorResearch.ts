@@ -390,6 +390,7 @@ CONTACT: ${researchData.contactName || 'Not found'}
   let scoringData: ScoringOutput | null = null;
   let attemptCount = 0;
   let lastRawInput: unknown = null;
+  const rawAttempts: unknown[] = [];
   const maxAttempts = 3;
 
   while (attemptCount < maxAttempts && !scoringData) {
@@ -409,6 +410,8 @@ CONTACT: ${researchData.contactName || 'Not found'}
       }
     }
 
+    if (lastRawInput) rawAttempts.push(lastRawInput);
+
     if (lastRawInput && isValidScoringOutput(lastRawInput)) {
       scoringData = lastRawInput;
     } else {
@@ -420,55 +423,69 @@ CONTACT: ${researchData.contactName || 'Not found'}
     }
   }
 
-  // Regex-repair fallback for known malformed pattern (any number of dimensions as string)
-  if (!scoringData && lastRawInput && typeof lastRawInput === 'object' && lastRawInput !== null) {
-    const raw = lastRawInput as Record<string, unknown>;
+  // Regex-repair fallback. Haiku occasionally breaks the nested
+  // {score, reasoning} schema under longer research inputs — reproduced two
+  // distinct malformed shapes for the same investor across 3 attempts, so
+  // every attempt (not just the last) gets a repair chance, tried in order.
+  if (!scoringData) {
     const dimensions = ['thesis', 'stage', 'geo', 'checkSize', 'portfolio', 'impact', 'network'] as const;
-    const scoreRegex = /<parameter name="score">(\d+)/;
+    const xmlLeakRegex = /<parameter name="score">(\d+)/;
 
-    const malformedDims: typeof dimensions[number][] = [];
-    let canRepair = true;
+    for (const attempt of rawAttempts) {
+      if (!attempt || typeof attempt !== 'object') continue;
+      const raw = attempt as Record<string, unknown>;
+      const repairedRaw = { ...raw };
+      const extractedScores: Record<string, number> = {};
+      const repairedDims: string[] = [];
+      let canRepair = true;
+      const topLevelReasoning = typeof raw['reasoning'] === 'string' ? raw['reasoning'] : null;
 
-    for (const dim of dimensions) {
-      if (isValidDimensionScore(raw[dim])) {
-        // Already valid, no repair needed
-      } else if (typeof raw[dim] === 'string' && scoreRegex.test(raw[dim] as string)) {
-        malformedDims.push(dim);
-      } else {
-        // Unknown malformed shape — abort repair entirely
+      for (const dim of dimensions) {
+        if (isValidDimensionScore(raw[dim])) continue; // already valid
+
+        // Shape A: dim is a flat numeric string, reasoning lives in a sibling
+        // key ("thesisReasoning" or "thesis.reasoning").
+        const siblingReasoningKey = Object.keys(raw).find(
+          k => k === `${dim}Reasoning` || k === `${dim}.reasoning`
+        );
+        const flatScore = typeof raw[dim] === 'string' ? parseInt(raw[dim] as string, 10) : NaN;
+
+        if (!isNaN(flatScore) && siblingReasoningKey && typeof raw[siblingReasoningKey] === 'string') {
+          repairedRaw[dim] = { score: flatScore, reasoning: raw[siblingReasoningKey] };
+          delete repairedRaw[siblingReasoningKey];
+          extractedScores[dim] = flatScore;
+          repairedDims.push(dim);
+          continue;
+        }
+
+        // Shape B: dim string contains a leaked XML-style tool-call fragment
+        // with the score, reasoning falls back to the top-level "reasoning".
+        if (typeof raw[dim] === 'string' && xmlLeakRegex.test(raw[dim] as string)) {
+          const match = (raw[dim] as string).match(xmlLeakRegex);
+          if (match && match[1]) {
+            const extractedScore = parseInt(match[1], 10);
+            repairedRaw[dim] = {
+              score: extractedScore,
+              reasoning: topLevelReasoning || 'Reasoning not available due to a model formatting issue for this dimension.',
+            };
+            extractedScores[dim] = extractedScore;
+            repairedDims.push(dim);
+            continue;
+          }
+        }
+
+        // Unknown malformed shape for this dimension — this attempt can't be repaired.
         canRepair = false;
         break;
       }
-    }
 
-    if (canRepair && malformedDims.length > 0) {
-      const topLevelReasoning = typeof raw['reasoning'] === 'string' ? raw['reasoning'] : null;
-      const repairedRaw = { ...raw };
-      const extractedScores: Record<string, number> = {};
-      let repairSuccess = true;
-
-      for (let i = 0; i < malformedDims.length; i++) {
-        const dim = malformedDims[i]!;
-        const match = (raw[dim] as string).match(scoreRegex);
-        if (match && match[1]) {
-          const extractedScore = parseInt(match[1], 10);
-          extractedScores[dim] = extractedScore;
-          const reasoning = (i === 0 && topLevelReasoning)
-            ? topLevelReasoning
-            : 'Reasoning not available due to a model formatting issue for this dimension.';
-          repairedRaw[dim] = { score: extractedScore, reasoning };
-        } else {
-          repairSuccess = false;
-          break;
-        }
-      }
-
-      if (repairSuccess && isValidScoringOutput(repairedRaw)) {
+      if (canRepair && repairedDims.length > 0 && isValidScoringOutput(repairedRaw)) {
         scoringData = repairedRaw as ScoringOutput;
         logger.info(
-          { investorId, repairedDimensions: malformedDims, extractedScores },
-          `repaired ${malformedDims.length} malformed dimension(s) via regex extraction: ${malformedDims.join(', ')}`
+          { investorId, repairedDimensions: repairedDims, extractedScores },
+          `repaired ${repairedDims.length} malformed dimension(s) via regex extraction: ${repairedDims.join(', ')}`
         );
+        break;
       }
     }
   }
