@@ -211,12 +211,14 @@ export async function writeFundraisingRound(input: {
 
 export async function writeFundingOpportunity(input: {
   name: string;
-  type: 'Accelerator' | 'Grant' | 'Government' | 'VC Program' | 'Competition' | 'Other';
+  type: 'accelerator' | 'grant' | 'incubator' | 'studio' | 'ecosystem-fund';
   provider: string;
   deadline?: string;
   amount?: string;
   eligibility: string;
+  website?: string;
   applyUrl?: string;
+  sourceUrl: string;
   region: string;
 }): Promise<string> {
   const db = await getDb();
@@ -227,14 +229,23 @@ export async function writeFundingOpportunity(input: {
     return `SKIPPED: "${input.name}" already exists in funding opportunities.`;
   }
 
+  // URL hygiene: applyUrl must trace back to something the model actually
+  // saw in web_search results (sourceUrl is required for that reason). If
+  // applyUrl was omitted, fall back to the verified homepage rather than
+  // leaving the Apply button pointed at nothing.
+  const applicationUrl = input.applyUrl || input.website || '';
+
   await collection.insertOne({
+    weekOf: new Date(),
     programName: input.name,
-    type: input.type.toLowerCase(),
+    type: input.type,
     provider: input.provider,
     deadline: input.deadline || 'Rolling',
     fundingAmount: input.amount || '',
     eligibilityReasoning: input.eligibility,
-    applicationUrl: input.applyUrl || '',
+    website: input.website || '',
+    applicationUrl,
+    sourceUrl: input.sourceUrl,
     geography: [input.region],
     status: 'open',
     dismissed: false,
@@ -242,6 +253,7 @@ export async function writeFundingOpportunity(input: {
     isAedaEligible: true,
     recommendedAction: '',
     priority: 'Medium',
+    archived: false,
     addedBy: 'hasmik',
     createdAt: new Date(),
   });

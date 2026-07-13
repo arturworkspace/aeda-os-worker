@@ -241,6 +241,16 @@ Work through ALL of these domains every run:
     (accelerator / grant / incubator / studio / ecosystem-fund) — do not
     default everything to "grant".
 
+    URL hygiene (previously a live bug — Apply buttons 404ing): applyUrl
+    must be copied verbatim from a URL that actually appeared in your
+    web_search results. Never invent, guess, or pattern-match a deep link
+    from the program name (e.g. don't construct ".../programs/fintech/"
+    just because it sounds plausible). If the exact application page
+    wasn't in your search results, put the organization's real homepage
+    in website and leave applyUrl empty — an empty link is recoverable,
+    a wrong one isn't. sourceUrl is required on every entry and must be
+    the exact result URL the entry was drawn from.
+
     Every entry MUST state in eligibilityReasoning: (a) whether it fits
     aeda's actual domain — crypto/stablecoin payments infrastructure,
     fintech, cross-border settlement — not fintech-adjacent in general,
@@ -499,16 +509,40 @@ function buildTools() {
             name: { type: 'string' },
             type: {
               type: 'string',
-              enum: ['Accelerator','Grant','Government','VC Program','Competition','Other'],
+              enum: ['accelerator','grant','incubator','studio','ecosystem-fund'],
+              description:
+                'Must match the taxonomy exactly (lowercase). Government programs and ' +
+                'agency funding calls (e.g. TAČR, EIC) → "grant". Competitions/challenges ' +
+                'with a cohort → "accelerator". VC matchmaking/deal-sharing networks ' +
+                '→ "ecosystem-fund". Studio/co-build programs → "studio".',
             },
             provider: { type: 'string' },
             deadline: { type: 'string', description: 'ISO date or "Rolling"' },
             amount: { type: 'string', description: 'e.g. "€50K", "$150K + equity"' },
             eligibility: { type: 'string', description: 'Specifically why aeda qualifies.' },
-            applyUrl: { type: 'string' },
+            website: {
+              type: 'string',
+              description: 'The organization\'s main homepage URL, e.g. "https://startupwiseguys.com".',
+            },
+            applyUrl: {
+              type: 'string',
+              description:
+                'The exact application/program page URL. CRITICAL: copy this verbatim from ' +
+                'a URL that actually appeared in your web_search results — never construct, ' +
+                'guess, or pattern-match a plausible-looking deep link from the program name. ' +
+                'If you cannot find the specific application page in your search results, leave ' +
+                'this field empty and use only the verified homepage in "website" instead. A ' +
+                'wrong/invented link is worse than no link.',
+            },
+            sourceUrl: {
+              type: 'string',
+              description:
+                'The exact URL of the web_search result this entry is based on — required, ' +
+                'so this claim can be traced back to where it was actually found.',
+            },
             region: { type: 'string', description: 'e.g. "EU", "Czech Republic", "Global"' },
           },
-          required: ['name','type','provider','eligibility','region'],
+          required: ['name','type','provider','eligibility','region','sourceUrl'],
         },
       },
       handler: async (input: Record<string, unknown>) =>
