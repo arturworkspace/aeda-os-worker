@@ -156,9 +156,29 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
         continue;
       }
 
-      if (!shouldTriggerFollowUp1(investor.firstEmailSentAt, now)) continue;
+      // Diagnostic: log the exact trigger computation for every eligible investor on
+      // every tick, not just when it fires. Added 2026-07-14 after a ~17-minute gap
+      // where a matching investor (Tatevik Simonyan) was silently not triggered by the
+      // scheduled Agenda run despite identical query logic returning her correctly when
+      // invoked manually via console — root cause was never conclusively identified
+      // (env vars, compiled code, and query all verified correct in production). This
+      // log line exists so the next occurrence is diagnosed in seconds, not hours.
+      const willTrigger1 = shouldTriggerFollowUp1(investor.firstEmailSentAt, now);
+      logger.info({
+        investorId: investor._id,
+        name: investor.name,
+        firstEmailSentAt: investor.firstEmailSentAt,
+        now,
+        minutesSince: minutesBetween(investor.firstEmailSentAt, now),
+        testMinutesThreshold: FOLLOWUP_1_TEST_MINUTES,
+        businessDaysThreshold: FOLLOW_UP_1_BUSINESS_DAYS,
+        willTrigger: willTrigger1,
+      }, 'follow-up 1 trigger check');
+
+      if (!willTrigger1) continue;
       const daysSinceFirst = businessDaysBetween(investor.firstEmailSentAt, now);
 
+      try {
         // Check if draft already exists (hard cap: never create duplicate)
         const existingDraft = await emailDraftRepo.findByInvestorAndStage(
           investor._id as Types.ObjectId,
@@ -381,13 +401,29 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
             costUsd: 0,
           },
         });
+      } catch (perInvestorError) {
+        // Resilience: one investor's unexpected error must not silently abort the
+        // whole run (previously an uncaught error here would bubble to the outer
+        // catch, marking the ENTIRE job failed and skipping every other investor
+        // and the follow-up 2 pass too). Log loudly and move on.
+        const errMsg = perInvestorError instanceof Error ? perInvestorError.message : String(perInvestorError);
+        logger.error({
+          investorId: investor._id,
+          name: investor.name,
+          error: errMsg,
+          stack: perInvestorError instanceof Error ? perInvestorError.stack : undefined,
+        }, 'follow-up 1 processing failed for this investor - continuing with others');
       }
+    }
 
       // ═══════════════════════════════════════════════════════════════════
       // FOLLOW-UP 2: investors needing second follow-up
       // ═══════════════════════════════════════════════════════════════════
       const needingFollowUp2 = await investorRepo.findNeedingFollowUp2();
-      logger.info({ count: needingFollowUp2.length }, 'investors checked for follow-up 2');
+      logger.info({
+        count: needingFollowUp2.length,
+        investors: needingFollowUp2.map(i => ({ id: i._id, name: i.name, followUp1SentAt: i.followUp1SentAt })),
+      }, 'investors checked for follow-up 2');
 
       for (const investor of needingFollowUp2) {
         if (!investor.followUp1SentAt) continue;
@@ -404,9 +440,23 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
           continue;
         }
 
-        if (!shouldTriggerFollowUp2(investor.followUp1SentAt, now)) continue;
+        // Diagnostic: same reasoning as the follow-up 1 trigger-check log above.
+        const willTrigger2 = shouldTriggerFollowUp2(investor.followUp1SentAt, now);
+        logger.info({
+          investorId: investor._id,
+          name: investor.name,
+          followUp1SentAt: investor.followUp1SentAt,
+          now,
+          minutesSince: minutesBetween(investor.followUp1SentAt, now),
+          testMinutesThreshold: FOLLOWUP_2_TEST_MINUTES,
+          businessDaysThreshold: FOLLOW_UP_2_BUSINESS_DAYS,
+          willTrigger: willTrigger2,
+        }, 'follow-up 2 trigger check');
+
+        if (!willTrigger2) continue;
         const daysSinceFollowUp1 = businessDaysBetween(investor.followUp1SentAt, now);
 
+        try {
         // Check if draft already exists (hard cap: never create duplicate)
         const existingDraft = await emailDraftRepo.findByInvestorAndStage(
           investor._id as Types.ObjectId,
@@ -634,6 +684,16 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
             costUsd: 0,
           },
         });
+        } catch (perInvestorError) {
+          // Same resilience reasoning as follow-up 1's per-investor catch above.
+          const errMsg = perInvestorError instanceof Error ? perInvestorError.message : String(perInvestorError);
+          logger.error({
+            investorId: investor._id,
+            name: investor.name,
+            error: errMsg,
+            stack: perInvestorError instanceof Error ? perInvestorError.stack : undefined,
+          }, 'follow-up 2 processing failed for this investor - continuing with others');
+        }
       }
 
     success = true;
