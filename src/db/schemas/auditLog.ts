@@ -30,6 +30,8 @@ export const AUDIT_EVENT_TYPES = [
   'investor.followup2_existing_draft_skip',
   'investor.followup2_processing_error',
   'investor.followup_scheduler_paused_early_exit',
+  'investor.followup_scheduler_entered',
+  'investor.followup_scheduler_pause_flag_read',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];

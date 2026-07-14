@@ -102,6 +102,18 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
   let draftsCreated = 0;
   let totalCostUsd = 0;
 
+  // Bulletproof entry diagnostic (added 2026-07-15): fires unconditionally as the very
+  // first line, before the pause check, before any query. If this event is ever missing
+  // for a tick where job.run DID fire, that proves Agenda is not really calling this
+  // function body for that tick (e.g. a stale/duplicate job definition or lock issue) -
+  // ruling in or out "the function never truly starts" vs. "it starts and exits early."
+  writeAuditEvent({
+    actor: 'system',
+    actorType: 'system',
+    eventType: 'investor.followup_scheduler_entered',
+    payload: { startedAt: new Date(startTime) },
+  }).catch(() => { /* never let entry diagnostic break the run */ });
+
   // Log which mode is active
   if (FOLLOWUP_1_TEST_MINUTES !== null) {
     logger.info({ minutes: FOLLOWUP_1_TEST_MINUTES }, 'using TEST MODE: minute threshold for followup1');
@@ -128,6 +140,18 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
     // explanation for a long-lived-connection-only stale read that a fresh connection
     // (every manual test) would never reproduce.
     const globalSettings = await OsSettings.findOne({ key: 'global' }).read('primary').lean();
+    // Unconditional raw-read diagnostic — fires every tick regardless of the value,
+    // so we can see exactly what this specific read saw without depending on the
+    // early-exit branch also succeeding.
+    await writeAuditEvent({
+      actor: 'system',
+      actorType: 'system',
+      eventType: 'investor.followup_scheduler_pause_flag_read',
+      payload: {
+        outreachPaused: globalSettings?.outreachPaused ?? null,
+        found: !!globalSettings,
+      },
+    }).catch(() => { /* never let this diagnostic break the run */ });
     if (globalSettings?.outreachPaused) {
       logger.info({
         pausedBy: globalSettings.outreachPausedBy,
