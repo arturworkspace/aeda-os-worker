@@ -498,6 +498,22 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
         investors: needingFollowUp2.map(i => ({ id: i._id, name: i.name, followUp1SentAt: i.followUp1SentAt })),
       }, 'investors checked for follow-up 2');
 
+      // Mirrors the follow-up 1 query_result diagnostic (1911dec). Follow-up 1's own
+      // recurring gap turned out to be a variable, sometimes very long delay rather
+      // than a permanent miss (fired 26 min late on 2026-07-14 after being stuck since
+      // the 5-min threshold) — and follow-up 2 is showing the same symptom live right
+      // now (followUp1SentAt way past the 14-min threshold, no draft yet). This gives
+      // the same before/after visibility for follow-up 2 that helped narrow follow-up 1.
+      await writeAuditEvent({
+        actor: 'system',
+        actorType: 'system',
+        eventType: 'investor.followup2_query_result',
+        payload: {
+          count: needingFollowUp2.length,
+          investorIds: needingFollowUp2.map(i => (i._id as Types.ObjectId).toString()),
+        },
+      });
+
       for (const investor of needingFollowUp2) {
         if (!investor.followUp1SentAt) continue;
 
@@ -526,6 +542,21 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
           willTrigger: willTrigger2,
         }, 'follow-up 2 trigger check');
 
+        await writeAuditEvent({
+          actor: 'system',
+          actorType: 'system',
+          eventType: 'investor.followup2_trigger_check',
+          payload: {
+            investorId: (investor._id as Types.ObjectId).toString(),
+            investorName: investor.name,
+            followUp1SentAt: investor.followUp1SentAt,
+            now,
+            minutesSince: minutesBetween(investor.followUp1SentAt, now),
+            testMinutesThreshold: FOLLOWUP_2_TEST_MINUTES,
+            willTrigger: willTrigger2,
+          },
+        });
+
         if (!willTrigger2) continue;
         const daysSinceFollowUp1 = businessDaysBetween(investor.followUp1SentAt, now);
 
@@ -537,6 +568,18 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
         );
         if (existingDraft) {
           logger.info({ investorId: investor._id, name: investor.name }, 'follow-up 2 draft already exists, skipping');
+          await writeAuditEvent({
+            actor: 'system',
+            actorType: 'system',
+            eventType: 'investor.followup2_existing_draft_skip',
+            payload: {
+              investorId: (investor._id as Types.ObjectId).toString(),
+              investorName: investor.name,
+              existingDraftId: (existingDraft._id as Types.ObjectId).toString(),
+              existingDraftStatus: existingDraft.status,
+              existingDraftCreatedAt: existingDraft.created_at,
+            },
+          });
           continue;
         }
 
@@ -766,6 +809,16 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
             error: errMsg,
             stack: perInvestorError instanceof Error ? perInvestorError.stack : undefined,
           }, 'follow-up 2 processing failed for this investor - continuing with others');
+          await writeAuditEvent({
+            actor: 'system',
+            actorType: 'system',
+            eventType: 'investor.followup2_processing_error',
+            payload: {
+              investorId: (investor._id as Types.ObjectId).toString(),
+              investorName: investor.name,
+              error: errMsg,
+            },
+          }).catch(() => { /* never let audit logging itself break the loop */ });
         }
       }
 
