@@ -1,4 +1,4 @@
-import { Agenda, Job } from 'agenda';
+import { Agenda } from 'agenda';
 import { Types } from 'mongoose';
 import * as fs from 'fs';
 import { investorRepo } from '../db/repos/investor.repo.js';
@@ -913,10 +913,33 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
   };
 }
 
-export function defineJob(agenda: Agenda): void {
-  agenda.define(JOB_NAME, async (_job: Job) => {
-    await runFollowUpScheduler();
-  });
+// --------------------------------------------------------------------------
+// 2026-07-15: Agenda-based scheduling for THIS job was removed and replaced
+// with a self-managed setInterval loop. Root cause investigation (see commit
+// 5d883c0 and the audit trail around it) proved, with a fully synchronous
+// fs.appendFileSync diagnostic at the literal first line of
+// runFollowUpScheduler, that Agenda's own job-locking/execution internals
+// were NOT reliably invoking this function's body on every scheduled tick
+// (1 real invocation logged vs. 7 "job.run" completions in the same
+// 6-minute window) — while Agenda's own os_agenda_jobs bookkeeping
+// (lastRunAt/lastFinishedAt) showed regular, healthy-looking activity the
+// whole time. That contradiction is only possible if Agenda itself is doing
+// something we can't fully explain or verify from the outside. Rather than
+// keep trusting a black box that produces self-contradictory telemetry for
+// a job Artur has explicitly called a "matter of principle" to get right,
+// this job now runs on a plain, fully-inspectable interval timer owned by
+// this process — no external locking, no DB-driven scheduling, nothing to
+// silently disagree with itself. All other jobs (heartbeat, backups, cost
+// rollup, hasmik intelligence, gmail send-status sync) are unaffected and
+// still run on Agenda, since none of them showed this symptom.
+// --------------------------------------------------------------------------
+
+let schedulerTimer: ReturnType<typeof setInterval> | null = null;
+let lastProdRunDateKey: string | null = null;
+
+/** No-op kept only so existing defineAllJobs() call sites don't need to change. */
+export function defineJob(_agenda: Agenda): void {
+  logger.info('[followup-scheduler] defineJob() is a no-op — this job no longer runs via Agenda, see scheduleJob()');
 }
 
 export async function scheduleJob(agenda: Agenda): Promise<void> {
@@ -931,29 +954,52 @@ export async function scheduleJob(agenda: Agenda): Promise<void> {
 
   logger.info(`[followup-scheduler] startup config: FOLLOWUP_1_TEST_MINUTES=${followup1TestMinutes}, FOLLOWUP_2_TEST_MINUTES=${followup2TestMinutes}, isTestMode=${isTestMode}`);
 
-  // Cancel ALL existing jobs with this name (scheduled or not) to ensure clean state
+  // Clean up any stale Agenda-scheduled job left over from before this change,
+  // so there is no chance of a duplicate/competing execution path.
   const cancelledCount = await agenda.cancel({ name: JOB_NAME });
-  logger.info(`[followup-scheduler] cancelled ${cancelledCount} existing job(s)`);
+  logger.info(`[followup-scheduler] cancelled ${cancelledCount} legacy Agenda job(s) for ${JOB_NAME} (scheduling now handled by a local interval, not Agenda)`);
 
-  // Schedule fresh
-  const repeatInterval = isTestMode ? '1 minute' : '0 8 * * *';
-  const options = isTestMode ? {} : { timezone: 'Europe/Prague' };
-  await agenda.every(repeatInterval, JOB_NAME, {}, options);
-
-  // Fetch the newly created job to log its nextRunAt
-  const db = agenda._mdb;
-  if (db) {
-    const job = await db.collection('os_agenda_jobs').findOne({
-      name: JOB_NAME,
-      repeatInterval: { $exists: true },
-    });
-    if (job) {
-      const nextRunAt = job['nextRunAt'];
-      logger.info(`[followup-scheduler] scheduled: interval="${repeatInterval}", nextRunAt=${nextRunAt instanceof Date ? nextRunAt.toISOString() : nextRunAt}`);
-    } else {
-      logger.warn(`[followup-scheduler] job scheduled but not found in DB immediately after creation`);
-    }
-  } else {
-    logger.info(`[followup-scheduler] scheduled: interval="${repeatInterval}" (DB not accessible for nextRunAt log)`);
+  if (schedulerTimer) {
+    clearInterval(schedulerTimer);
+    schedulerTimer = null;
   }
+  lastProdRunDateKey = null;
+
+  // Test mode: tick every minute, exactly like before, but via a timer this
+  // process owns directly. Production: tick every 5 minutes and self-gate to
+  // once/day at 8am Europe/Prague inside runTick(), preserving the original
+  // "0 8 * * * Europe/Prague" intent without depending on Agenda's cron parsing.
+  const tickIntervalMs = isTestMode ? 60_000 : 5 * 60_000;
+
+  const runTick = (): void => {
+    void (async () => {
+      if (!isTestMode) {
+        const pragueDateKey = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Europe/Prague',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).format(new Date());
+        const pragueHour = parseInt(
+          new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Prague', hour: '2-digit', hour12: false }).format(new Date()),
+          10
+        );
+        if (pragueHour !== 8 || lastProdRunDateKey === pragueDateKey) {
+          return;
+        }
+        lastProdRunDateKey = pragueDateKey;
+      }
+      try {
+        await runFollowUpScheduler();
+      } catch (err) {
+        logger.error({ err: err instanceof Error ? err.message : String(err) }, '[followup-scheduler] interval tick threw unexpectedly');
+      }
+    })();
+  };
+
+  schedulerTimer = setInterval(runTick, tickIntervalMs);
+  // Run one check immediately on boot/deploy instead of waiting a full interval.
+  runTick();
+
+  logger.info(`[followup-scheduler] scheduled via local setInterval: isTestMode=${isTestMode}, tickIntervalMs=${tickIntervalMs}`);
 }
