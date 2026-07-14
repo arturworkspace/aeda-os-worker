@@ -1,5 +1,6 @@
 import { Agenda, Job } from 'agenda';
 import { Types } from 'mongoose';
+import * as fs from 'fs';
 import { investorRepo } from '../db/repos/investor.repo.js';
 import { emailDraftRepo } from '../db/repos/emailDraft.repo.js';
 import { InboxItem } from '../db/schemas/inboxItem.js';
@@ -96,6 +97,19 @@ export interface FollowUpSchedulerResult {
 }
 
 export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
+  // Bulletproof, fully-synchronous, zero-dependency entry diagnostic (added 2026-07-15,
+  // 2nd attempt). The async writeAuditEvent-based "entered" diagnostic added earlier today
+  // fired exactly ONCE (at the moment of a manual HTTP-triggered call) across 16 consecutive
+  // scheduled ticks that all completed successfully per job.run (written later in this same
+  // function's finally block) — an apparent contradiction. This line bypasses Mongoose,
+  // async/await, and the audit log schema entirely: a raw synchronous fs write, so a missing
+  // line here can only mean Agenda genuinely did not invoke this function body for that tick.
+  try {
+    fs.appendFileSync('/tmp/followup_ticks.log', `${new Date().toISOString()} pid=${process.pid}\n`);
+  } catch {
+    /* never let the diagnostic itself break the run */
+  }
+
   const startTime = Date.now();
   let success = false;
   let errorMessage: string | undefined;
