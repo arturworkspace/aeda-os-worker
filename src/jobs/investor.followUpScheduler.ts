@@ -115,13 +115,36 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
   }
 
   try {
-    // Check global outreach pause flag
-    const globalSettings = await OsSettings.findOne({ key: 'global' }).lean();
+    // Check global outreach pause flag.
+    // Added .read('primary') 2026-07-15: found via direct comparison of scheduled-tick
+    // durationMs (~440ms, constant, every single tick since the previous maxIdleTimeMS
+    // fix) vs. a manual invocation of this exact function (3833ms, found+processed
+    // Tatevik correctly). A ~440ms run is only long enough to do ONE query and return —
+    // consistent with silently taking the early-return branch below on every scheduled
+    // tick, despite os_settings.outreachPaused being false in the DB (verified directly)
+    // the whole time. This query had never had .read('primary') applied (unlike the
+    // investor/emailDraft queries hardened earlier the same day), making it the one
+    // remaining unhardened read on the scheduler's hot path — and the most likely
+    // explanation for a long-lived-connection-only stale read that a fresh connection
+    // (every manual test) would never reproduce.
+    const globalSettings = await OsSettings.findOne({ key: 'global' }).read('primary').lean();
     if (globalSettings?.outreachPaused) {
       logger.info({
         pausedBy: globalSettings.outreachPausedBy,
         pausedAt: globalSettings.outreachPausedAt,
       }, 'follow-up scheduler skipped - global outreach is PAUSED');
+      // Persisted diagnostic: if this fires again after the .read('primary') hardening
+      // above, it proves the early-exit theory wrong and the stale read lives elsewhere.
+      await writeAuditEvent({
+        actor: 'system',
+        actorType: 'system',
+        eventType: 'investor.followup_scheduler_paused_early_exit',
+        payload: {
+          outreachPaused: globalSettings.outreachPaused,
+          pausedBy: globalSettings.outreachPausedBy,
+          pausedAt: globalSettings.outreachPausedAt,
+        },
+      }).catch(() => { /* never let audit logging itself break the early return */ });
       return {
         success: true,
         draftsCreated: 0,
