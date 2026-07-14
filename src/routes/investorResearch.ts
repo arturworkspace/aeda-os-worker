@@ -1842,6 +1842,53 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
         return;
       }
 
+      // Download and base64-encode ourselves rather than passing source:{type:'url'} —
+      // Anthropic's own server-side fetcher returned "Unable to download the file" on
+      // at least one real, publicly-fetchable image (Lightshot/img.lightshot.app) that
+      // downloads fine from here, so don't depend on their fetcher working for every host.
+      const MEDIA_TYPE_BY_CONTENT_TYPE: Record<string, 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'> = {
+        'image/jpeg': 'image/jpeg',
+        'image/jpg': 'image/jpeg',
+        'image/png': 'image/png',
+        'image/gif': 'image/gif',
+        'image/webp': 'image/webp',
+      };
+      const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
+      let imageBase64: string;
+      let mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        const imgRes = await fetch(cleanScreenshotUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
+
+        if (!imgRes.ok) {
+          res.status(200).json({ status: 'failed', error: `Couldn't fetch that URL (HTTP ${imgRes.status}) — double-check it's public and correct.` });
+          return;
+        }
+        const contentType = ((imgRes.headers.get('content-type') || '').split(';')[0] ?? '').trim().toLowerCase();
+        if (!MEDIA_TYPE_BY_CONTENT_TYPE[contentType]) {
+          res.status(200).json({
+            status: 'failed',
+            error: `That URL returned "${contentType || 'unknown'}" content, not an image — it's likely a webpage ` +
+              'rather than a direct image file. Right-click the actual image and choose "Copy Image Address".',
+          });
+          return;
+        }
+        const buf = await imgRes.arrayBuffer();
+        if (buf.byteLength > MAX_IMAGE_BYTES) {
+          res.status(200).json({ status: 'failed', error: 'That image is too large (over 10MB) — try a smaller/cropped screenshot.' });
+          return;
+        }
+        imageBase64 = Buffer.from(buf).toString('base64');
+        mediaType = MEDIA_TYPE_BY_CONTENT_TYPE[contentType];
+      } catch (fetchErr) {
+        const fetchErrMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+        logger.error({ error: fetchErrMsg, screenshotUrl: cleanScreenshotUrl }, 'screenshot download failed');
+        res.status(200).json({ status: 'failed', error: 'Couldn\'t download that URL — double-check it\'s public and reachable, then try again.' });
+        return;
+      }
+
       const visionResponse = await anthropic.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 512,
@@ -1857,7 +1904,7 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
         messages: [{
           role: 'user',
           content: [
-            { type: 'image', source: { type: 'url', url: cleanScreenshotUrl } },
+            { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } },
             { type: 'text', text: 'Extract this LinkedIn profile\'s details exactly as shown in the screenshot above.' },
           ],
         }],
