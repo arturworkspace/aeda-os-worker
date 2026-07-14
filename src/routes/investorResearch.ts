@@ -1798,6 +1798,96 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // LINKEDIN-SCREENSHOT-AUTOFILL: Same output shape as /linkedin-autofill, but
+  // for profiles web_search can't find at all (short/obscure vanity URLs).
+  // Artur pastes a public URL to a screenshot of the actual profile page and
+  // Claude reads it directly via vision — no search, no inference from a URL
+  // slug, just literal transcription of what's visible in the image.
+  // ═══════════════════════════════════════════════════════════════════════════
+  router.post('/linkedin-screenshot-autofill', async (req: Request, res: Response) => {
+    const provided = req.headers['x-trigger-secret'];
+    const expected = process.env['TRIGGER_SECRET'];
+    if (!expected || provided !== expected) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { screenshotUrl, linkedinUrl } = req.body as { screenshotUrl?: string; linkedinUrl?: string };
+    if (!screenshotUrl || !/^https:\/\/.+/i.test(screenshotUrl.trim())) {
+      res.status(400).json({ error: 'A public https:// image URL is required' });
+      return;
+    }
+    const cleanScreenshotUrl = screenshotUrl.trim();
+    const cleanLinkedinUrl = (linkedinUrl || '').trim();
+
+    try {
+      const dayToDateCost = await costLedgerRepo.getDayToDateTotal();
+      if (dayToDateCost >= RESEARCH_DAILY_BUDGET_USD) {
+        res.status(200).json({ status: 'failed', error: 'Daily research budget cap reached — try again tomorrow or fill in manually.' });
+        return;
+      }
+
+      const visionResponse = await anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 512,
+        system:
+          'You read a screenshot of a LinkedIn profile page for aeda\'s investor CRM and call ' +
+          'structure_linkedin_profile with ONLY what is literally visible in the image. Do not infer, guess, ' +
+          'or use outside knowledge about who this might be — transcribe what the image shows. If the image is ' +
+          'not a LinkedIn profile, is unreadable, or is missing a field, use null for that field. Set ' +
+          'confidence "high" if the name and current role are clearly legible; "low" if the image is partially ' +
+          'illegible, cropped, or ambiguous.',
+        tools: [LINKEDIN_AUTOFILL_TOOL],
+        tool_choice: { type: 'tool', name: 'structure_linkedin_profile' },
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'url', url: cleanScreenshotUrl } },
+            { type: 'text', text: 'Extract this LinkedIn profile\'s details exactly as shown in the screenshot above.' },
+          ],
+        }],
+      });
+
+      const costUsd = estimateCostUsd('claude-sonnet-4-6', {
+        input_tokens: visionResponse.usage.input_tokens,
+        output_tokens: visionResponse.usage.output_tokens,
+        cache_creation_input_tokens: (visionResponse.usage as { cache_creation_input_tokens?: number }).cache_creation_input_tokens,
+        cache_read_input_tokens: (visionResponse.usage as { cache_read_input_tokens?: number }).cache_read_input_tokens,
+      });
+
+      await costLedgerRepo.insert({
+        agentOrJob: 'investor-linkedin-screenshot-autofill',
+        packageId: null,
+        projectKey: null,
+        llmModel: 'claude-sonnet-4-6',
+        inputTokens: visionResponse.usage.input_tokens,
+        outputTokens: visionResponse.usage.output_tokens,
+        costUsd,
+        estimatedMaxUsd: costUsd,
+        tier: 'production',
+      });
+
+      const toolUse = visionResponse.content.find((b) => b.type === 'tool_use');
+      const data = (toolUse && 'input' in toolUse ? toolUse.input : {}) as {
+        fullName: string | null;
+        firm: string | null;
+        title: string | null;
+        geography: string | null;
+        headline: string | null;
+        confidence: 'high' | 'low';
+      };
+
+      logger.info({ screenshotUrl: cleanScreenshotUrl, confidence: data.confidence, costUsd }, 'linkedin screenshot autofill completed');
+
+      res.json({ status: 'ok', linkedinUrl: cleanLinkedinUrl, ...data, costUsd });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      logger.error({ error: errorMsg, screenshotUrl: cleanScreenshotUrl }, 'linkedin screenshot autofill failed');
+      res.status(500).json({ status: 'failed', error: errorMsg });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // DRAFT-EMAIL: Generate first-outreach email draft for an investor
   // ═══════════════════════════════════════════════════════════════════════════
   router.post('/draft-email', async (req: Request, res: Response) => {
