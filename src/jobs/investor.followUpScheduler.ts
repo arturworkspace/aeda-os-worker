@@ -227,6 +227,24 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
         );
         if (existingDraft) {
           logger.info({ investorId: investor._id, name: investor.name }, 'follow-up 1 draft already exists, skipping');
+          // Persisted: needed to distinguish "willTrigger was true but a stale/phantom
+          // existingDraft read silently short-circuited creation" from "an exception
+          // was thrown downstream" (see catch block below) or "draft genuinely created
+          // but something else is wrong". emailDraftRepo has never had .read('primary')
+          // applied — if THIS is where the recurring gap actually lives, it would look
+          // exactly like what we've observed: success:true, draftsCreated:0, no error.
+          await writeAuditEvent({
+            actor: 'system',
+            actorType: 'system',
+            eventType: 'investor.followup1_existing_draft_skip',
+            payload: {
+              investorId: (investor._id as Types.ObjectId).toString(),
+              investorName: investor.name,
+              existingDraftId: (existingDraft._id as Types.ObjectId).toString(),
+              existingDraftStatus: existingDraft.status,
+              existingDraftCreatedAt: existingDraft.created_at,
+            },
+          });
           continue;
         }
 
@@ -454,6 +472,20 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
           error: errMsg,
           stack: perInvestorError instanceof Error ? perInvestorError.stack : undefined,
         }, 'follow-up 1 processing failed for this investor - continuing with others');
+        // Persisted twin of the logger.error above — this per-investor catch was the
+        // one place in the whole draft-creation path with NO durable record, so if an
+        // exception here is what's silently eating the recurring gap, we've never been
+        // able to see it (logger.info/error to stdout has proven unreliable twice now).
+        await writeAuditEvent({
+          actor: 'system',
+          actorType: 'system',
+          eventType: 'investor.followup1_processing_error',
+          payload: {
+            investorId: (investor._id as Types.ObjectId).toString(),
+            investorName: investor.name,
+            error: errMsg,
+          },
+        }).catch(() => { /* never let audit logging itself break the loop */ });
       }
     }
 

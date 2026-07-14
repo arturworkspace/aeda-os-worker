@@ -23,6 +23,8 @@ export const AUDIT_EVENT_TYPES = [
   'investor.reply_detected',
   'investor.followup1_trigger_check',
   'investor.followup1_query_result',
+  'investor.followup1_existing_draft_skip',
+  'investor.followup1_processing_error',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];

@@ -115,10 +115,19 @@ export const emailDraftRepo = {
     investorId: Types.ObjectId | string,
     followUpStage: 'followup1' | 'followup2'
   ): Promise<IEmailDraftDocument | null> {
+    // Force primary read. Added 2026-07-14: this is the "existing draft" duplicate
+    // check gating follow-up creation in investor.followUpScheduler.ts. It had no
+    // readPreference override (unlike investor.repo.ts's findNeedingFollowUp1/2,
+    // hardened earlier the same day) and is a plausible narrower home for the same
+    // long-lived-connection-vs-fresh-connection staleness pattern we've been chasing:
+    // a stale/phantom read here would silently skip draft creation with no error,
+    // exactly matching the observed symptom (success:true, draftsCreated:0).
     return EmailDraft.findOne({
       investorId: new Types.ObjectId(investorId.toString()),
       followUpStage,
-    }).exec();
+    })
+      .read('primary')
+      .exec();
   },
 
   async findByInvestorAndDraftType(
