@@ -1800,9 +1800,12 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
   // ═══════════════════════════════════════════════════════════════════════════
   // LINKEDIN-SCREENSHOT-AUTOFILL: Same output shape as /linkedin-autofill, but
   // for profiles web_search can't find at all (short/obscure vanity URLs).
-  // Artur pastes a public URL to a screenshot of the actual profile page and
-  // Claude reads it directly via vision — no search, no inference from a URL
-  // slug, just literal transcription of what's visible in the image.
+  // Artur pastes a screenshot of the actual profile page directly from his
+  // clipboard and Claude reads it via vision — no search, no URL fetch (the
+  // URL-based path was removed after clipboard-paste proved more reliable:
+  // share-page hosts like prnt.sc return an HTML viewer, not raw image bytes,
+  // and even direct image URLs occasionally failed Anthropic's own server-side
+  // fetch).
   // ═══════════════════════════════════════════════════════════════════════════
   router.post('/linkedin-screenshot-autofill', async (req: Request, res: Response) => {
     const provided = req.headers['x-trigger-secret'];
@@ -1812,8 +1815,7 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
       return;
     }
 
-    const { screenshotUrl, linkedinUrl, imageBase64: pastedBase64, mediaType: pastedMediaType } = req.body as {
-      screenshotUrl?: string;
+    const { linkedinUrl, imageBase64: pastedBase64, mediaType: pastedMediaType } = req.body as {
       linkedinUrl?: string;
       imageBase64?: string; // raw base64, no data: prefix — clipboard-pasted image, already encoded client-side
       mediaType?: string;
@@ -1829,83 +1831,23 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
     };
     const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
 
-    if (!screenshotUrl && !pastedBase64) {
-      res.status(400).json({ error: 'A screenshotUrl or a pasted imageBase64 is required' });
+    if (!pastedBase64) {
+      res.status(400).json({ error: 'A pasted imageBase64 is required' });
       return;
     }
 
-    let imageBase64: string;
-    let mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
-
-    if (pastedBase64) {
-      // Clipboard paste path — no URL, no download, no share-page ambiguity at all.
-      const resolvedMediaType = MEDIA_TYPE_BY_CONTENT_TYPE[(pastedMediaType || '').toLowerCase()];
-      if (!resolvedMediaType) {
-        res.status(200).json({ status: 'failed', error: `Unsupported clipboard image type: ${pastedMediaType || 'unknown'}.` });
-        return;
-      }
-      const approxBytes = (pastedBase64.length * 3) / 4;
-      if (approxBytes > MAX_IMAGE_BYTES) {
-        res.status(200).json({ status: 'failed', error: 'That image is too large (over 10MB) — try a smaller/cropped screenshot.' });
-        return;
-      }
-      imageBase64 = pastedBase64;
-      mediaType = resolvedMediaType;
-    } else {
-      const cleanScreenshotUrl = (screenshotUrl as string).trim();
-      if (!/^https:\/\/.+/i.test(cleanScreenshotUrl)) {
-        res.status(400).json({ error: 'A public https:// image URL is required' });
-        return;
-      }
-
-      // Common share-page hosts return an HTML viewer page at this URL shape, not the
-      // raw image bytes — Claude's vision call would fail on these with a confusing
-      // "invalid file format" error, so catch the common ones up front with a message
-      // that tells Artur exactly what to paste instead.
-      const SHARE_PAGE_HOSTS = /^https:\/\/(prnt\.sc|imgur\.com\/a\/|imgur\.com\/gallery\/|postimg\.cc\/(?!.*\.(png|jpe?g|gif|webp))|ibb\.co(?!.*\.(png|jpe?g|gif|webp)))/i;
-      if (SHARE_PAGE_HOSTS.test(cleanScreenshotUrl)) {
-        res.status(200).json({
-          status: 'failed',
-          error: 'That looks like a share-page link (shows the image inside a webpage), not a direct image file — ' +
-            'try pasting the screenshot directly (Cmd/Ctrl+V) instead of a URL.',
-        });
-        return;
-      }
-
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
-        const imgRes = await fetch(cleanScreenshotUrl, { signal: controller.signal });
-        clearTimeout(timeoutId);
-
-        if (!imgRes.ok) {
-          res.status(200).json({ status: 'failed', error: `Couldn't fetch that URL (HTTP ${imgRes.status}) — double-check it's public and correct.` });
-          return;
-        }
-        const contentType = ((imgRes.headers.get('content-type') || '').split(';')[0] ?? '').trim().toLowerCase();
-        const resolvedMediaType = MEDIA_TYPE_BY_CONTENT_TYPE[contentType];
-        if (!resolvedMediaType) {
-          res.status(200).json({
-            status: 'failed',
-            error: `That URL returned "${contentType || 'unknown'}" content, not an image — it's likely a webpage ` +
-              'rather than a direct image file. Try pasting the screenshot directly (Cmd/Ctrl+V) instead.',
-          });
-          return;
-        }
-        const buf = await imgRes.arrayBuffer();
-        if (buf.byteLength > MAX_IMAGE_BYTES) {
-          res.status(200).json({ status: 'failed', error: 'That image is too large (over 10MB) — try a smaller/cropped screenshot.' });
-          return;
-        }
-        imageBase64 = Buffer.from(buf).toString('base64');
-        mediaType = resolvedMediaType;
-      } catch (fetchErr) {
-        const fetchErrMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
-        logger.error({ error: fetchErrMsg, screenshotUrl: cleanScreenshotUrl }, 'screenshot download failed');
-        res.status(200).json({ status: 'failed', error: 'Couldn\'t download that URL — double-check it\'s public and reachable, then try again.' });
-        return;
-      }
+    const resolvedMediaType = MEDIA_TYPE_BY_CONTENT_TYPE[(pastedMediaType || '').toLowerCase()];
+    if (!resolvedMediaType) {
+      res.status(200).json({ status: 'failed', error: `Unsupported clipboard image type: ${pastedMediaType || 'unknown'}.` });
+      return;
     }
+    const approxBytes = (pastedBase64.length * 3) / 4;
+    if (approxBytes > MAX_IMAGE_BYTES) {
+      res.status(200).json({ status: 'failed', error: 'That image is too large (over 10MB) — try a smaller/cropped screenshot.' });
+      return;
+    }
+    const imageBase64: string = pastedBase64;
+    const mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' = resolvedMediaType;
 
     try {
       const dayToDateCost = await costLedgerRepo.getDayToDateTotal();
@@ -1964,21 +1906,18 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
         confidence: 'high' | 'low';
       };
 
-      logger.info({ screenshotUrl: screenshotUrl || '(pasted)', confidence: data.confidence, costUsd }, 'linkedin screenshot autofill completed');
+      logger.info({ confidence: data.confidence, costUsd }, 'linkedin screenshot autofill completed');
 
       res.json({ status: 'ok', linkedinUrl: cleanLinkedinUrl, ...data, costUsd });
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      logger.error({ error: errorMsg, screenshotUrl: screenshotUrl || '(pasted)' }, 'linkedin screenshot autofill failed');
-      // Anthropic returns this when the URL didn't resolve to actual image bytes
-      // (most often a share/viewer page rather than a direct image link) — translate
-      // it into something actionable instead of surfacing the raw API error.
+      logger.error({ error: errorMsg }, 'linkedin screenshot autofill failed');
+      // Anthropic returns this if the pasted image data is somehow malformed —
+      // translate it into something actionable instead of surfacing the raw API error.
       if (/invalid or unsupported/i.test(errorMsg) || /image\.source/i.test(errorMsg)) {
         res.status(200).json({
           status: 'failed',
-          error: 'Couldn\'t read that as an image — the URL likely points to a webpage rather than a direct ' +
-            'image file. Right-click the actual image and choose "Copy Image Address" (should end in ' +
-            '.png/.jpg/.gif/.webp), then paste that.',
+          error: 'Couldn\'t read that image — try taking a fresh screenshot and pasting it again.',
         });
         return;
       }
