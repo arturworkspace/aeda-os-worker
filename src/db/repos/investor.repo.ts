@@ -18,7 +18,15 @@ export const investorRepo = {
         // Accept both non-existent and null (reset sets null, not $unset)
         { $or: [{ followUp1SentAt: { $exists: false } }, { followUp1SentAt: null }] },
       ],
-    }).exec();
+    })
+      // Force primary read. Added 2026-07-14 as a hardening measure after the scheduled
+      // Agenda job (long-lived connection) repeatedly failed to find investors that a
+      // fresh script connection found instantly on the exact same query, twice in a row.
+      // No default readPreference override was found anywhere in this codebase, so this
+      // should be a no-op under normal conditions — but it removes any possibility of a
+      // stale-secondary or connection-pinning read explaining the gap, at zero cost.
+      .read('primary')
+      .exec();
   },
 
   /**
@@ -37,7 +45,9 @@ export const investorRepo = {
         // Accept both non-existent and null (reset sets null, not $unset)
         { $or: [{ followUp2SentAt: { $exists: false } }, { followUp2SentAt: null }] },
       ],
-    }).exec();
+    })
+      .read('primary')
+      .exec();
   },
 
   /**
