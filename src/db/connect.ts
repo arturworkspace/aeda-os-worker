@@ -26,6 +26,20 @@ export async function connectDb(): Promise<typeof mongoose> {
         serverSelectionTimeoutMS: 10000,
         connectTimeoutMS: 10000,
         socketTimeoutMS: 45000,
+        // Added 2026-07-14: the follow-up scheduler repeatedly showed the same
+        // pattern — a long-idle connection lagging by 10-27 minutes before a
+        // scheduled operation succeeded, immediately fixed by every fresh
+        // container deploy (new connection). Classic symptom of network
+        // infrastructure between Railway and Atlas silently dropping TCP
+        // connections that sit idle too long between Agenda ticks (60s apart,
+        // but most ticks find nothing to do and touch the DB only briefly).
+        // No maxIdleTimeMS was set before, so the driver never proactively
+        // recycled idle connections — it just kept reusing one until an
+        // operation on it happened to hit the dead socket, then paid the
+        // reconnect-and-retry cost silently. Setting this well under the
+        // 60s tick interval keeps a connection from ever going stale enough
+        // for external infra to kill it first.
+        maxIdleTimeMS: 20000,
       });
 
       isConnected = true;
