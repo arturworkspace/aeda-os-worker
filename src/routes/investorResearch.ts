@@ -153,23 +153,33 @@ const LINKEDIN_AUTOFILL_TOOL = {
     properties: {
       fullName: {
         type: ['string', 'null'] as const,
-        description: 'The person\'s full name as it appears on the profile. Null if not confidently identified.',
+        description:
+          'The person\'s full name. Extract it if the findings mention ANY name tied to this URL/person, even ' +
+          'a partial or uncertain one (set confidence "low" in that case). NEVER invent a name from the URL ' +
+          'slug itself (e.g. do not turn "linkedin.com/in/shefi" into "Shefi") — a slug is not a name. Null if ' +
+          'the findings state no matching profile/person was found, or contain zero name-bearing text.',
       },
       firm: {
         type: ['string', 'null'] as const,
-        description: 'Current employer / fund / firm name. Null if not found.',
+        description:
+          'Current employer / fund / firm name, only if actually mentioned in the findings (even loosely — ' +
+          'set confidence "low" if uncertain which of several mentions is current). NEVER output placeholder ' +
+          'words like "Unknown", "N/A", or "Not found" as if they were a value — use null instead. Null if no ' +
+          'firm/employer is mentioned anywhere in the findings.',
       },
       title: {
         type: ['string', 'null'] as const,
-        description: 'Current job title (e.g. "Partner", "Principal", "Angel Investor"). Null if not found.',
+        description:
+          'Current job title (e.g. "Partner", "Principal", "Angel Investor"), only if actually mentioned in ' +
+          'the findings. Do not default to a generic title when none was stated. Null if not found.',
       },
       geography: {
         type: ['string', 'null'] as const,
-        description: 'Location / region shown on the profile (e.g. "Berlin, Germany"). Null if not found.',
+        description: 'Location / region shown on the profile (e.g. "Berlin, Germany"), only if actually mentioned in the findings. Null if not found.',
       },
       headline: {
         type: ['string', 'null'] as const,
-        description: 'One-line professional headline/summary, if visible. Null if not found.',
+        description: 'One-line professional headline/summary, if visible in the findings. Null if not found.',
       },
       confidence: {
         type: 'string' as const,
@@ -177,7 +187,10 @@ const LINKEDIN_AUTOFILL_TOOL = {
         description:
           '"high" only if web_search surfaced content that specifically and unambiguously matches this exact ' +
           'LinkedIn URL (e.g. the URL itself appeared in a result, or name+title match a cited source). ' +
-          '"low" if this is a best guess, the profile wasn\'t found, or multiple people could match.',
+          '"low" if a field above is a genuine partial/uncertain read from the findings (not a placeholder, ' +
+          'not an invented default) — "low" tells the UI to show a review warning, it does not license making ' +
+          'something up. If the findings say no profile/person was found at all, every field must be null ' +
+          'regardless of confidence.',
       },
     },
     required: ['fullName', 'firm', 'title', 'geography', 'headline', 'confidence'],
@@ -1733,7 +1746,12 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
       const structureResponse = await anthropic.messages.create({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 512,
-        system: 'Extract structured data from the LinkedIn lookup findings and call structure_linkedin_profile. Use null for anything not confidently found.',
+        system:
+          'Extract structured data from the LinkedIn lookup findings and call structure_linkedin_profile. ' +
+          'Extract only what the findings actually state. If the findings mention a partial or uncertain detail ' +
+          '(a name spelled tentatively, a firm mentioned in passing), include it and set confidence "low" — do ' +
+          'not discard real signal just because it is imperfect. But if the findings say no matching profile ' +
+          'was found, do not invent a name, firm, or title to fill the gap; use null and confidence "low".',
         tools: [LINKEDIN_AUTOFILL_TOOL],
         tool_choice: { type: 'tool', name: 'structure_linkedin_profile' },
         messages: [{ role: 'user', content: `LinkedIn URL: ${cleanUrl}\n\nFindings:\n${lookupText || '(no content returned)'}` }],
