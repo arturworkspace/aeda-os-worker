@@ -52,7 +52,11 @@ const FOLLOW_UP_2_BUSINESS_DAYS = 5;
 // template (src/lib/outreachTemplates.ts) with no LLM call. See git history on commit
 // 429a326 for the prior LLM-prompt version if ever needed for reference.
 
-// Test mode: env vars to use minute-based thresholds instead of business days
+// Test mode: env vars to use minute-based thresholds instead of business days.
+// Values live only on Railway (never in .env / git) — confirmed via dashboard on
+// 2026-07-14: FOLLOWUP_1_TEST_MINUTES=5, FOLLOWUP_2_TEST_MINUTES=14. Artur has
+// designated this pair the baseline for pre-launch testing — do NOT change these
+// on Railway (or suggest changing them) without his explicit approval first.
 const FOLLOWUP_1_TEST_MINUTES = process.env['FOLLOWUP_1_TEST_MINUTES']
   ? parseInt(process.env['FOLLOWUP_1_TEST_MINUTES'], 10)
   : null;
