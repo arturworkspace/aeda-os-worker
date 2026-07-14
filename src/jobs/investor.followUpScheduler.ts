@@ -40,8 +40,12 @@ function validateNoForbiddenPlaceholders(subject: string, body: string, investor
   return { valid: true };
 }
 
-const FOLLOW_UP_1_BUSINESS_DAYS = 5;
-const FOLLOW_UP_2_BUSINESS_DAYS = 7;
+// Aligned to Julia's approved 4-email sequence (Day 1 -> Day 4 -> Day 9 -> Day 14):
+// Follow-up 1 fires 3 business days after First Reach (Day 1 -> Day 4), Follow-up 2
+// fires 5 business days after Follow-up 1 (Day 4 -> Day 9). Previously 5 and 7, which
+// drifted the live cadence later than the documented/approved sequence.
+const FOLLOW_UP_1_BUSINESS_DAYS = 3;
+const FOLLOW_UP_2_BUSINESS_DAYS = 5;
 
 // NOTE: the positioning guardrails and LLM-drafting prompt that used to live here were
 // removed — Follow-up 1 and Follow-up 2 are now rendered from a fixed, founder-approved
