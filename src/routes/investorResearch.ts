@@ -1812,50 +1812,66 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
       return;
     }
 
-    const { screenshotUrl, linkedinUrl } = req.body as { screenshotUrl?: string; linkedinUrl?: string };
-    if (!screenshotUrl || !/^https:\/\/.+/i.test(screenshotUrl.trim())) {
-      res.status(400).json({ error: 'A public https:// image URL is required' });
-      return;
-    }
-    const cleanScreenshotUrl = screenshotUrl.trim();
+    const { screenshotUrl, linkedinUrl, imageBase64: pastedBase64, mediaType: pastedMediaType } = req.body as {
+      screenshotUrl?: string;
+      linkedinUrl?: string;
+      imageBase64?: string; // raw base64, no data: prefix — clipboard-pasted image, already encoded client-side
+      mediaType?: string;
+    };
     const cleanLinkedinUrl = (linkedinUrl || '').trim();
 
-    // Common share-page hosts return an HTML viewer page at this URL shape, not the
-    // raw image bytes — Claude's vision call would fail on these with a confusing
-    // "invalid file format" error, so catch the common ones up front with a message
-    // that tells Artur exactly what to paste instead.
-    const SHARE_PAGE_HOSTS = /^https:\/\/(prnt\.sc|imgur\.com\/a\/|imgur\.com\/gallery\/|postimg\.cc\/(?!.*\.(png|jpe?g|gif|webp))|ibb\.co(?!.*\.(png|jpe?g|gif|webp)))/i;
-    if (SHARE_PAGE_HOSTS.test(cleanScreenshotUrl)) {
-      res.status(200).json({
-        status: 'failed',
-        error: 'That looks like a share-page link (shows the image inside a webpage), not a direct image file — ' +
-          'Claude can only read the raw image. Open the image, right-click it, choose "Copy Image Address" ' +
-          '(should end in .png/.jpg), and paste that instead.',
-      });
+    const MEDIA_TYPE_BY_CONTENT_TYPE: Record<string, 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'> = {
+      'image/jpeg': 'image/jpeg',
+      'image/jpg': 'image/jpeg',
+      'image/png': 'image/png',
+      'image/gif': 'image/gif',
+      'image/webp': 'image/webp',
+    };
+    const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
+
+    if (!screenshotUrl && !pastedBase64) {
+      res.status(400).json({ error: 'A screenshotUrl or a pasted imageBase64 is required' });
       return;
     }
 
-    try {
-      const dayToDateCost = await costLedgerRepo.getDayToDateTotal();
-      if (dayToDateCost >= RESEARCH_DAILY_BUDGET_USD) {
-        res.status(200).json({ status: 'failed', error: 'Daily research budget cap reached — try again tomorrow or fill in manually.' });
+    let imageBase64: string;
+    let mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+
+    if (pastedBase64) {
+      // Clipboard paste path — no URL, no download, no share-page ambiguity at all.
+      const resolvedMediaType = MEDIA_TYPE_BY_CONTENT_TYPE[(pastedMediaType || '').toLowerCase()];
+      if (!resolvedMediaType) {
+        res.status(200).json({ status: 'failed', error: `Unsupported clipboard image type: ${pastedMediaType || 'unknown'}.` });
+        return;
+      }
+      const approxBytes = (pastedBase64.length * 3) / 4;
+      if (approxBytes > MAX_IMAGE_BYTES) {
+        res.status(200).json({ status: 'failed', error: 'That image is too large (over 10MB) — try a smaller/cropped screenshot.' });
+        return;
+      }
+      imageBase64 = pastedBase64;
+      mediaType = resolvedMediaType;
+    } else {
+      const cleanScreenshotUrl = (screenshotUrl as string).trim();
+      if (!/^https:\/\/.+/i.test(cleanScreenshotUrl)) {
+        res.status(400).json({ error: 'A public https:// image URL is required' });
         return;
       }
 
-      // Download and base64-encode ourselves rather than passing source:{type:'url'} —
-      // Anthropic's own server-side fetcher returned "Unable to download the file" on
-      // at least one real, publicly-fetchable image (Lightshot/img.lightshot.app) that
-      // downloads fine from here, so don't depend on their fetcher working for every host.
-      const MEDIA_TYPE_BY_CONTENT_TYPE: Record<string, 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'> = {
-        'image/jpeg': 'image/jpeg',
-        'image/jpg': 'image/jpeg',
-        'image/png': 'image/png',
-        'image/gif': 'image/gif',
-        'image/webp': 'image/webp',
-      };
-      const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
-      let imageBase64: string;
-      let mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+      // Common share-page hosts return an HTML viewer page at this URL shape, not the
+      // raw image bytes — Claude's vision call would fail on these with a confusing
+      // "invalid file format" error, so catch the common ones up front with a message
+      // that tells Artur exactly what to paste instead.
+      const SHARE_PAGE_HOSTS = /^https:\/\/(prnt\.sc|imgur\.com\/a\/|imgur\.com\/gallery\/|postimg\.cc\/(?!.*\.(png|jpe?g|gif|webp))|ibb\.co(?!.*\.(png|jpe?g|gif|webp)))/i;
+      if (SHARE_PAGE_HOSTS.test(cleanScreenshotUrl)) {
+        res.status(200).json({
+          status: 'failed',
+          error: 'That looks like a share-page link (shows the image inside a webpage), not a direct image file — ' +
+            'try pasting the screenshot directly (Cmd/Ctrl+V) instead of a URL.',
+        });
+        return;
+      }
+
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -1867,11 +1883,12 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
           return;
         }
         const contentType = ((imgRes.headers.get('content-type') || '').split(';')[0] ?? '').trim().toLowerCase();
-        if (!MEDIA_TYPE_BY_CONTENT_TYPE[contentType]) {
+        const resolvedMediaType = MEDIA_TYPE_BY_CONTENT_TYPE[contentType];
+        if (!resolvedMediaType) {
           res.status(200).json({
             status: 'failed',
             error: `That URL returned "${contentType || 'unknown'}" content, not an image — it's likely a webpage ` +
-              'rather than a direct image file. Right-click the actual image and choose "Copy Image Address".',
+              'rather than a direct image file. Try pasting the screenshot directly (Cmd/Ctrl+V) instead.',
           });
           return;
         }
@@ -1881,11 +1898,19 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
           return;
         }
         imageBase64 = Buffer.from(buf).toString('base64');
-        mediaType = MEDIA_TYPE_BY_CONTENT_TYPE[contentType];
+        mediaType = resolvedMediaType;
       } catch (fetchErr) {
         const fetchErrMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
         logger.error({ error: fetchErrMsg, screenshotUrl: cleanScreenshotUrl }, 'screenshot download failed');
         res.status(200).json({ status: 'failed', error: 'Couldn\'t download that URL — double-check it\'s public and reachable, then try again.' });
+        return;
+      }
+    }
+
+    try {
+      const dayToDateCost = await costLedgerRepo.getDayToDateTotal();
+      if (dayToDateCost >= RESEARCH_DAILY_BUDGET_USD) {
+        res.status(200).json({ status: 'failed', error: 'Daily research budget cap reached — try again tomorrow or fill in manually.' });
         return;
       }
 
@@ -1939,12 +1964,12 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
         confidence: 'high' | 'low';
       };
 
-      logger.info({ screenshotUrl: cleanScreenshotUrl, confidence: data.confidence, costUsd }, 'linkedin screenshot autofill completed');
+      logger.info({ screenshotUrl: screenshotUrl || '(pasted)', confidence: data.confidence, costUsd }, 'linkedin screenshot autofill completed');
 
       res.json({ status: 'ok', linkedinUrl: cleanLinkedinUrl, ...data, costUsd });
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      logger.error({ error: errorMsg, screenshotUrl: cleanScreenshotUrl }, 'linkedin screenshot autofill failed');
+      logger.error({ error: errorMsg, screenshotUrl: screenshotUrl || '(pasted)' }, 'linkedin screenshot autofill failed');
       // Anthropic returns this when the URL didn't resolve to actual image bytes
       // (most often a share/viewer page rather than a direct image link) — translate
       // it into something actionable instead of surfacing the raw API error.
