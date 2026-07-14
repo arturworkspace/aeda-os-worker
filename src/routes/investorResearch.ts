@@ -1820,6 +1820,21 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
     const cleanScreenshotUrl = screenshotUrl.trim();
     const cleanLinkedinUrl = (linkedinUrl || '').trim();
 
+    // Common share-page hosts return an HTML viewer page at this URL shape, not the
+    // raw image bytes — Claude's vision call would fail on these with a confusing
+    // "invalid file format" error, so catch the common ones up front with a message
+    // that tells Artur exactly what to paste instead.
+    const SHARE_PAGE_HOSTS = /^https:\/\/(prnt\.sc|imgur\.com\/a\/|imgur\.com\/gallery\/|postimg\.cc\/(?!.*\.(png|jpe?g|gif|webp))|ibb\.co(?!.*\.(png|jpe?g|gif|webp)))/i;
+    if (SHARE_PAGE_HOSTS.test(cleanScreenshotUrl)) {
+      res.status(200).json({
+        status: 'failed',
+        error: 'That looks like a share-page link (shows the image inside a webpage), not a direct image file — ' +
+          'Claude can only read the raw image. Open the image, right-click it, choose "Copy Image Address" ' +
+          '(should end in .png/.jpg), and paste that instead.',
+      });
+      return;
+    }
+
     try {
       const dayToDateCost = await costLedgerRepo.getDayToDateTotal();
       if (dayToDateCost >= RESEARCH_DAILY_BUDGET_USD) {
@@ -1883,6 +1898,18 @@ router.post('/bulk-trigger', async (req: Request, res: Response) => {
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       logger.error({ error: errorMsg, screenshotUrl: cleanScreenshotUrl }, 'linkedin screenshot autofill failed');
+      // Anthropic returns this when the URL didn't resolve to actual image bytes
+      // (most often a share/viewer page rather than a direct image link) — translate
+      // it into something actionable instead of surfacing the raw API error.
+      if (/invalid or unsupported/i.test(errorMsg) || /image\.source/i.test(errorMsg)) {
+        res.status(200).json({
+          status: 'failed',
+          error: 'Couldn\'t read that as an image — the URL likely points to a webpage rather than a direct ' +
+            'image file. Right-click the actual image and choose "Copy Image Address" (should end in ' +
+            '.png/.jpg/.gif/.webp), then paste that.',
+        });
+        return;
+      }
       res.status(500).json({ status: 'failed', error: errorMsg });
     }
   });
