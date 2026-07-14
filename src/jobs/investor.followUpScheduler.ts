@@ -141,6 +141,20 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
       investors: needingFollowUp1.map(i => ({ id: i._id, name: i.name, firstEmailSentAt: i.firstEmailSentAt })),
     }, 'investors checked for follow-up 1');
 
+    // Persisted alongside the per-investor trigger-check event above — this is the
+    // query RESULT itself (before any per-investor filtering), so we can tell whether
+    // a "missing" investor was excluded by findNeedingFollowUp1() (query/connection
+    // layer) vs. excluded by later logic (hasReply/outreachPaused/willTrigger).
+    await writeAuditEvent({
+      actor: 'system',
+      actorType: 'system',
+      eventType: 'investor.followup1_query_result',
+      payload: {
+        count: needingFollowUp1.length,
+        investorIds: needingFollowUp1.map(i => (i._id as Types.ObjectId).toString()),
+      },
+    });
+
     for (const investor of needingFollowUp1) {
       if (!investor.firstEmailSentAt) continue;
 
@@ -174,6 +188,33 @@ export async function runFollowUpScheduler(): Promise<FollowUpSchedulerResult> {
         businessDaysThreshold: FOLLOW_UP_1_BUSINESS_DAYS,
         willTrigger: willTrigger1,
       }, 'follow-up 1 trigger check');
+
+      // Persisted, queryable diagnostic (added 2026-07-14 after Railway's Deploy Logs
+      // search UI proved unreliable for repeated-template lines, AND tailing PID 1's
+      // stdout via /proc/1/fd/1 from a sibling shell proved unreliable too — it's a
+      // pipe with a single existing consumer (Railway's log shipper), so a second
+      // reader races it and gets nothing. Writing straight to os_audit_log via our
+      // existing writeAuditEvent() sidesteps both problems: it's the same channel we
+      // already trust for job.run/followup_draft_created events, directly queryable,
+      // and immune to log-capture quirks. This is the ONLY reliable way we've found
+      // to prove, after the fact, whether the scheduled run actually evaluated a given
+      // investor and what it computed — do not remove until the recurring gap
+      // (4 occurrences as of this commit, including one AFTER the read('primary')
+      // hardening) is conclusively root-caused.
+      await writeAuditEvent({
+        actor: 'system',
+        actorType: 'system',
+        eventType: 'investor.followup1_trigger_check',
+        payload: {
+          investorId: (investor._id as Types.ObjectId).toString(),
+          investorName: investor.name,
+          firstEmailSentAt: investor.firstEmailSentAt,
+          now,
+          minutesSince: minutesBetween(investor.firstEmailSentAt, now),
+          testMinutesThreshold: FOLLOWUP_1_TEST_MINUTES,
+          willTrigger: willTrigger1,
+        },
+      });
 
       if (!willTrigger1) continue;
       const daysSinceFirst = businessDaysBetween(investor.firstEmailSentAt, now);

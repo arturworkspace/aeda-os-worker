@@ -21,6 +21,8 @@ export const AUDIT_EVENT_TYPES = [
   'investor.followup_draft_created',
   'investor.first_email_draft_created',
   'investor.reply_detected',
+  'investor.followup1_trigger_check',
+  'investor.followup1_query_result',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
