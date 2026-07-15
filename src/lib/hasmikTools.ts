@@ -319,7 +319,11 @@ interface DomainResearchState {
   domain: string;
   lastResearchedAt: Date;
   lastFindingsCount: number;
-  lastTopFindings: string[];  // titles of top 3 findings for context
+  lastTopFindings: string[];
+  lastWebSearchCount?: number;
+  lastEstimatedCostUsd?: number;
+  totalWebSearches?: number;
+  totalFindings?: number;
 }
 
 export async function getDomainResearchState(input: {
@@ -357,8 +361,11 @@ export async function updateDomainResearchState(input: {
   domain: string;
   findingsCount: number;
   topFindings: string[];
+  webSearchCount?: number;
 }): Promise<string> {
   const db = await getDb();
+  const webSearches = input.webSearchCount ?? 0;
+  const estimatedCost = webSearches * 0.03;  // ~$0.03 per web_search
 
   await db.collection('hasmik_research_state').updateOne(
     { domain: input.domain },
@@ -368,13 +375,20 @@ export async function updateDomainResearchState(input: {
         lastResearchedAt: new Date(),
         lastFindingsCount: input.findingsCount,
         lastTopFindings: input.topFindings.slice(0, 3),
+        lastWebSearchCount: webSearches,
+        lastEstimatedCostUsd: estimatedCost,
         updatedAt: new Date(),
+      },
+      $inc: {
+        totalWebSearches: webSearches,
+        totalFindings: input.findingsCount,
       },
     },
     { upsert: true }
   );
 
-  return `Updated research state for "${input.domain}": ${input.findingsCount} findings recorded.`;
+  const costNote = webSearches > 0 ? ` (~$${estimatedCost.toFixed(2)} in web searches)` : '';
+  return `Updated research state for "${input.domain}": ${input.findingsCount} findings, ${webSearches} web searches${costNote}.`;
 }
 
 export async function listAllDomainStates(): Promise<string> {
@@ -391,13 +405,18 @@ export async function listAllDomainStates(): Promise<string> {
   const lines = states.map(s => {
     const daysSince = Math.floor((Date.now() - new Date(s.lastResearchedAt).getTime()) / (1000 * 60 * 60 * 24));
     const dateStr = new Date(s.lastResearchedAt).toISOString().split('T')[0];
-    return `- ${s.domain}: ${dateStr} (${daysSince}d ago), ${s.lastFindingsCount} findings`;
+    const costNote = s.lastWebSearchCount ? `, ${s.lastWebSearchCount} searches (~$${(s.lastEstimatedCostUsd ?? 0).toFixed(2)})` : '';
+    return `- ${s.domain}: ${dateStr} (${daysSince}d ago), ${s.lastFindingsCount} findings${costNote}`;
   });
+
+  const totalSearches = states.reduce((sum, s) => sum + (s.totalWebSearches ?? 0), 0);
+  const totalFindings = states.reduce((sum, s) => sum + (s.totalFindings ?? 0), 0);
 
   return [
     `Research state for ${states.length} domains:`,
     ...lines,
     '',
+    `Cumulative: ${totalFindings} findings, ${totalSearches} web searches (~$${(totalSearches * 0.03).toFixed(2)})`,
     'Domains older than 7 days need fresh survey. Recent domains: incremental search only.',
   ].join('\n');
 }

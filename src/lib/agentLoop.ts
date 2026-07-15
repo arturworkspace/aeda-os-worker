@@ -36,6 +36,7 @@ export interface LoopConfig {
     edits: ContextManagementEdit[];
   };
   cacheSystemPrompt?: boolean;
+  webSearchCap?: number;  // Max web_search calls before injecting cap warning
 }
 
 export interface ContextEditStats {
@@ -54,6 +55,8 @@ export interface LoopResult {
   tokensSavedByEdits?: number;
   cacheCreationTokens?: number;
   cacheReadTokens?: number;
+  webSearchCount?: number;
+  webSearchCapped?: boolean;
 }
 
 export async function runAgentLoop(config: LoopConfig): Promise<LoopResult> {
@@ -89,6 +92,9 @@ export async function runAgentLoop(config: LoopConfig): Promise<LoopResult> {
   let totalTokensSavedByEdits = 0;
   let totalCacheCreationTokens = 0;
   let totalCacheReadTokens = 0;
+  let webSearchCount = 0;
+  let webSearchCapped = false;
+  const webSearchCap = config.webSearchCap ?? 50;  // Default cap: 50 searches
 
   const db = await getDb();
   const auditLog = db.collection('os_audit_log');
@@ -170,6 +176,22 @@ export async function runAgentLoop(config: LoopConfig): Promise<LoopResult> {
       for (const toolUse of toolUseBlocks) {
         const handler = handlerMap.get(toolUse.name);
 
+        // Track web_search calls and enforce cap
+        if (toolUse.name === 'web_search') {
+          webSearchCount++;
+          if (webSearchCount > webSearchCap && !webSearchCapped) {
+            webSearchCapped = true;
+            await auditLog.insertOne({
+              agentId: config.agentId,
+              jobName: config.jobName,
+              action: 'web_search_cap_reached',
+              webSearchCount,
+              webSearchCap,
+              createdAt: new Date(),
+            });
+          }
+        }
+
         if (handler) {
           toolCallCount++;
           let result: unknown;
@@ -202,12 +224,23 @@ export async function runAgentLoop(config: LoopConfig): Promise<LoopResult> {
             is_error: isError,
           });
         } else {
+          // Built-in tools (web_search) — no handler, but track
           toolResults.push({
             type: 'tool_result',
             tool_use_id: toolUse.id,
             content: '',
           });
         }
+      }
+
+      // Inject cap warning if web_search limit exceeded
+      if (webSearchCapped && webSearchCount === webSearchCap + 1) {
+        messages.push({
+          role: 'user',
+          content: `⚠️ WEB_SEARCH CAP REACHED: You have used ${webSearchCap} web searches. ` +
+            `Further searches are expensive (~$0.03 each). Prioritize writing findings ` +
+            `from searches already completed. Only search if critical information is missing.`,
+        });
       }
 
       messages.push({ role: 'user', content: toolResults });
@@ -246,6 +279,12 @@ export async function runAgentLoop(config: LoopConfig): Promise<LoopResult> {
   }
   if (totalCacheReadTokens > 0) {
     result.cacheReadTokens = totalCacheReadTokens;
+  }
+  if (webSearchCount > 0) {
+    result.webSearchCount = webSearchCount;
+  }
+  if (webSearchCapped) {
+    result.webSearchCapped = true;
   }
   return result;
 }

@@ -700,7 +700,7 @@ function buildTools() {
         description:
           'Record that you have completed researching a domain. Call this AFTER ' +
           'finishing each domain so the next run knows what was already found. ' +
-          'Include the top findings so the next run has context.',
+          'Include the top findings and web_search count for cost tracking.',
         input_schema: {
           type: 'object' as const,
           properties: {
@@ -717,12 +717,16 @@ function buildTools() {
               items: { type: 'string' },
               description: 'Titles of top 3 most significant findings (for context in next run)',
             },
+            webSearchCount: {
+              type: 'number',
+              description: 'Number of web_search calls made for this domain (for cost tracking)',
+            },
           },
           required: ['domain', 'findingsCount', 'topFindings'],
         },
       },
       handler: async (input: Record<string, unknown>) =>
-        updateDomainResearchState(input as { domain: string; findingsCount: number; topFindings: string[] }),
+        updateDomainResearchState(input as { domain: string; findingsCount: number; topFindings: string[]; webSearchCount?: number }),
     },
   ];
 }
@@ -755,6 +759,7 @@ export async function runHasmikIntelligence(): Promise<void> {
       builtInTools: [{ type: 'web_search_20250305', name: 'web_search' }],
       customTools: buildTools(),
       cacheSystemPrompt: true,
+      webSearchCap: 40,  // Cap at 40 searches (~$1.20), warn after
       contextManagement: {
         edits: [{
           type: 'clear_tool_uses_20250919',
@@ -826,6 +831,11 @@ export async function runHasmikIntelligence(): Promise<void> {
           promptCaching: {
             cacheCreationTokens: result.cacheCreationTokens ?? 0,
             cacheReadTokens: result.cacheReadTokens ?? 0,
+          },
+          webSearch: {
+            count: result.webSearchCount ?? 0,
+            capped: result.webSearchCapped ?? false,
+            estimatedCost: (result.webSearchCount ?? 0) * 0.03,
           },
           summary: result.finalResponse.slice(0, 500),
         },
