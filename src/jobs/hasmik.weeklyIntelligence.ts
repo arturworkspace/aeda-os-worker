@@ -934,6 +934,12 @@ export function defineJob(agenda: Agenda): void {
 }
 
 export async function scheduleJob(agenda: Agenda): Promise<void> {
+  // Cancel any existing job to ensure fresh schedule
+  await agenda.cancel({ name: JOB_NAME });
   await agenda.every('0 19 * * 1', JOB_NAME, {}, { timezone: 'Europe/Prague' });
-  logger.info('[hasmik] weekly intelligence job scheduled — Monday 19:00 Prague');
+
+  // Log the next run time for verification
+  const jobs = await agenda.jobs({ name: JOB_NAME });
+  const nextRun = jobs[0]?.attrs?.nextRunAt;
+  logger.info({ nextRunAt: nextRun }, '[hasmik] weekly intelligence job scheduled — Monday 19:00 Prague');
 }
