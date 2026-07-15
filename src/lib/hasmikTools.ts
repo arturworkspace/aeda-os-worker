@@ -308,6 +308,100 @@ interface KnowledgeEntry {
   sourceType: string;
 }
 
+// ============================================================================
+// INCREMENTAL RESEARCH STATE
+// ============================================================================
+// Tracks when each research domain was last surveyed, enabling the agent to
+// request "news since [date]" rather than full re-survey. Reduces cost by
+// avoiding redundant web_search calls on slowly-changing domains.
+
+interface DomainResearchState {
+  domain: string;
+  lastResearchedAt: Date;
+  lastFindingsCount: number;
+  lastTopFindings: string[];  // titles of top 3 findings for context
+}
+
+export async function getDomainResearchState(input: {
+  domain: string;
+}): Promise<string> {
+  const db = await getDb();
+  const state = await db.collection('hasmik_research_state').findOne({
+    domain: input.domain,
+  }) as DomainResearchState | null;
+
+  if (!state) {
+    return `Domain "${input.domain}" has never been researched. Perform full survey.`;
+  }
+
+  const daysSince = Math.floor((Date.now() - new Date(state.lastResearchedAt).getTime()) / (1000 * 60 * 60 * 24));
+  const dateStr = new Date(state.lastResearchedAt).toISOString().split('T')[0];
+
+  return [
+    `Domain: ${input.domain}`,
+    `Last researched: ${dateStr} (${daysSince} days ago)`,
+    `Findings that run: ${state.lastFindingsCount}`,
+    state.lastTopFindings.length > 0
+      ? `Top findings then: ${state.lastTopFindings.join('; ')}`
+      : 'No prior findings recorded.',
+    '',
+    daysSince <= 3
+      ? `GUIDANCE: Very recent. Search for "since:${dateStr}" or "this week" only. Skip if domain is slow-moving.`
+      : daysSince <= 7
+        ? `GUIDANCE: Search for news since ${dateStr}. Use "since:" or date filters in queries.`
+        : `GUIDANCE: Over a week old. Perform standard survey but note prior findings to avoid duplicates.`,
+  ].join('\n');
+}
+
+export async function updateDomainResearchState(input: {
+  domain: string;
+  findingsCount: number;
+  topFindings: string[];
+}): Promise<string> {
+  const db = await getDb();
+
+  await db.collection('hasmik_research_state').updateOne(
+    { domain: input.domain },
+    {
+      $set: {
+        domain: input.domain,
+        lastResearchedAt: new Date(),
+        lastFindingsCount: input.findingsCount,
+        lastTopFindings: input.topFindings.slice(0, 3),
+        updatedAt: new Date(),
+      },
+    },
+    { upsert: true }
+  );
+
+  return `Updated research state for "${input.domain}": ${input.findingsCount} findings recorded.`;
+}
+
+export async function listAllDomainStates(): Promise<string> {
+  const db = await getDb();
+  const states = await db.collection('hasmik_research_state')
+    .find({})
+    .sort({ lastResearchedAt: -1 })
+    .toArray() as unknown as DomainResearchState[];
+
+  if (states.length === 0) {
+    return 'No prior research state. This appears to be first run — survey all domains.';
+  }
+
+  const lines = states.map(s => {
+    const daysSince = Math.floor((Date.now() - new Date(s.lastResearchedAt).getTime()) / (1000 * 60 * 60 * 24));
+    const dateStr = new Date(s.lastResearchedAt).toISOString().split('T')[0];
+    return `- ${s.domain}: ${dateStr} (${daysSince}d ago), ${s.lastFindingsCount} findings`;
+  });
+
+  return [
+    `Research state for ${states.length} domains:`,
+    ...lines,
+    '',
+    'Domains older than 7 days need fresh survey. Recent domains: incremental search only.',
+  ].join('\n');
+}
+
 export async function readRecentKnowledgeTitles(input: {
   category?: string;
   daysBack?: number;

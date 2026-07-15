@@ -7,6 +7,9 @@ import {
   writeFundingOpportunity,
   writeInboxSignal,
   readRecentKnowledgeTitles,
+  getDomainResearchState,
+  updateDomainResearchState,
+  listAllDomainStates,
   MONITORED_THOUGHT_LEADERS,
 } from '../lib/hasmikTools.js';
 import { getDb } from '../lib/db.js';
@@ -277,7 +280,42 @@ What NOT to write:
 - Regulatory interpretations without official source
 - Anything you are not confident is accurate
 - Duplicate entries (always check existing titles first)
-- Entries scoring ≤ 3 (automatic noise gate)`;
+- Entries scoring ≤ 3 (automatic noise gate)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+INCREMENTAL RESEARCH (COST OPTIMIZATION)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+You have access to research state tracking. Use it to avoid redundant work:
+
+1. ALWAYS call list_domain_research_states at the START of every run
+   → This tells you when each domain was last surveyed
+
+2. For domains researched within 3 days:
+   → SKIP unless there's a known major event
+   → These domains are unlikely to have significant new developments
+
+3. For domains researched 3-7 days ago:
+   → Use INCREMENTAL search: "site:eba.europa.eu since:2026-07-08"
+   → Focus on "this week" or "today" in search queries
+   → Only look for news SINCE the last research date
+
+4. For domains researched >7 days ago:
+   → Perform full survey as usual
+
+5. AFTER completing each domain:
+   → Call update_domain_research_state with findings count and top 3 titles
+   → This enables the next run to be incremental
+
+DOMAIN NAMING CONVENTION (use these exact names):
+- regulation-eu, regulation-us, regulation-aml
+- technology-solana, technology-circle, technology-infra
+- competitors-stablecoin, competitors-remittance
+- market-funding, market-eeca
+- influencers
+- opportunities
+
+This tracking reduces your web_search calls by 50-70% on typical runs.`;
 
 function buildInitialMessage(): string {
   const today = new Date().toISOString().split('T')[0];
@@ -285,10 +323,21 @@ function buildInitialMessage(): string {
   weekStart.setDate(weekStart.getDate() - weekStart.getDay());
   const weekStartStr = weekStart.toISOString().split('T')[0];
 
-  return `Run this week's full intelligence scan for aeda.
+  return `Run this week's intelligence scan for aeda.
 Today: ${today}. Current week started: ${weekStartStr}.
 
-SEQUENCE — work through in this order:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PHASE 0: CHECK RESEARCH STATE (MANDATORY)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+BEFORE any research, call list_domain_research_states to see what was
+already researched and when. This determines your research strategy:
+
+- Domains <3 days old: SKIP entirely (unlikely to have new developments)
+- Domains 3-7 days old: INCREMENTAL search only (use "since:YYYY-MM-DD")
+- Domains >7 days old: Full survey
+
+This saves ~50% of web_search calls on typical runs.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PHASE 1: ORGANIZATION-WIDE INTELLIGENCE
@@ -297,7 +346,7 @@ PHASE 1: ORGANIZATION-WIDE INTELLIGENCE
 1. Read recent knowledge titles (call read_recent_knowledge_titles
    for each category) to understand what already exists.
 
-2. Research and write entries domain by domain:
+2. Research and write entries domain by domain (respecting incremental rules):
    - Regulation: EBA, ESMA, EC, ECB, CNB, CBA, FATF, SEC, CFTC
    - Technology: Solana, Circle EURC, Bridge.xyz, Sumsub, Helius
    - Product: Circle EURC updates, Bridge.xyz, Sumsub, Privy, Helius
@@ -317,6 +366,11 @@ PHASE 1: ORGANIZATION-WIDE INTELLIGENCE
    use write_inbox_signal with type 'potential-misinformation'.
 
 5. Write all relevant fundraising opportunities for aeda.
+
+6. AFTER EACH DOMAIN: Call update_domain_research_state with:
+   - domain name (use standard names: regulation-eu, competitors-stablecoin, etc.)
+   - findingsCount: how many entries you wrote
+   - topFindings: titles of the 3 most significant findings
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PHASE 2: AGENT-SPECIFIC PROFESSIONAL UPDATES
@@ -600,6 +654,75 @@ function buildTools() {
       },
       handler: async (input: Record<string, unknown>) =>
         readRecentKnowledgeTitles(input as Parameters<typeof readRecentKnowledgeTitles>[0]),
+    },
+    // ========================================================================
+    // INCREMENTAL RESEARCH TOOLS
+    // ========================================================================
+    {
+      schema: {
+        name: 'list_domain_research_states',
+        description:
+          'CALL THIS FIRST at the start of every run. Lists when each research domain ' +
+          'was last surveyed, so you can prioritize stale domains and skip recent ones. ' +
+          'Returns guidance on which domains need full survey vs incremental search.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {},
+          required: [],
+        },
+      },
+      handler: async () => listAllDomainStates(),
+    },
+    {
+      schema: {
+        name: 'get_domain_research_state',
+        description:
+          'Check when a specific domain was last researched and what was found. ' +
+          'Use this before researching a domain to determine if you need a full survey ' +
+          'or just an incremental search for recent news.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            domain: {
+              type: 'string',
+              description: 'Domain name, e.g. "regulation-eu", "competitors-stablecoin", "technology-solana"',
+            },
+          },
+          required: ['domain'],
+        },
+      },
+      handler: async (input: Record<string, unknown>) =>
+        getDomainResearchState(input as { domain: string }),
+    },
+    {
+      schema: {
+        name: 'update_domain_research_state',
+        description:
+          'Record that you have completed researching a domain. Call this AFTER ' +
+          'finishing each domain so the next run knows what was already found. ' +
+          'Include the top findings so the next run has context.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            domain: {
+              type: 'string',
+              description: 'Domain name, e.g. "regulation-eu", "competitors-stablecoin", "technology-solana"',
+            },
+            findingsCount: {
+              type: 'number',
+              description: 'Number of knowledge entries written for this domain',
+            },
+            topFindings: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Titles of top 3 most significant findings (for context in next run)',
+            },
+          },
+          required: ['domain', 'findingsCount', 'topFindings'],
+        },
+      },
+      handler: async (input: Record<string, unknown>) =>
+        updateDomainResearchState(input as { domain: string; findingsCount: number; topFindings: string[] }),
     },
   ];
 }
