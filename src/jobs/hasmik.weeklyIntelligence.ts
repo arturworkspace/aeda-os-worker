@@ -303,7 +303,10 @@ PHASE 1: ORGANIZATION-WIDE INTELLIGENCE
    - Product: Circle EURC updates, Bridge.xyz, Sumsub, Privy, Helius
    - Competitors: all 11 stablecoin apps + 8 remittance players
    - Wise specifically: any Armenia re-entry signal?
-   - Market: EU pre-seed fintech raises this week
+   - Market: EU pre-seed fintech raises THIS WEEK ONLY
+     CRITICAL: Search specifically for "fintech funding announced today"
+     or "fintech raised this week" — the 14-day freshness filter will
+     reject anything older. Focus on announcements from the past 7 days.
    - Influencers: Simon Taylor, Nic Carter, Marcel van Oost,
      Jeremy Allaire — blogs and newsletters only
 
