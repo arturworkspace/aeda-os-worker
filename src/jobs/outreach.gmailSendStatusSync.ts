@@ -404,6 +404,59 @@ export async function runGmailSendStatusSync(): Promise<GmailSendStatusSyncResul
               await investorRepo.markReplyReceived(investor._id as Types.ObjectId, sentiment);
               repliesDetected++;
 
+              // Create an InboxItem for the reply itself so it shows up in Julia's Inbox
+              // tab. Previously only markReplyReceived() ran here, which updates the
+              // Investor record (hasReply, replySentiment, threadMessages via Part 3) but
+              // never notified Julia's Inbox — that tab queries strictly on
+              // routing.routed_to_agent, and nothing on this code path ever set it, so
+              // replies were detected and stored correctly but structurally invisible
+              // without opening the specific investor's Correspondence tab. Wrapped in its
+              // own try/catch so a failure here can never block reply detection, the
+              // per-investor pending-draft cleanup below, or the audit event.
+              try {
+                const replySubject = msg.payload?.headers?.find(h => h.name?.toLowerCase() === 'subject')?.value
+                  || `Reply from ${investor.name}`;
+                const replyInboxItem = new InboxItem({
+                  recipient: 'julia@aeda.internal',
+                  sender_email: from,
+                  sender_name: investor.name,
+                  subject: replySubject,
+                  body_raw: '',
+                  body_sanitized: '',
+                  body_hardened: '',
+                  body_text: bodyText,
+                  body_html: '',
+                  attachments: [],
+                  agent_commentary: `Investor reply detected — sentiment: ${sentiment}. Investor: ${investor.name} (${investor.firm || 'Unknown'})`,
+                  received_at: msgDate,
+                  message_id: `investor-reply-${(investor._id as Types.ObjectId).toHexString()}-${msg.id || Date.now()}`,
+                  in_reply_to: null,
+                  crm_match: {
+                    matched: true,
+                    investor_id: (investor._id as Types.ObjectId).toHexString(),
+                    investor_name: investor.name,
+                    matched_on: null,
+                  },
+                  routing: {
+                    artur_classification: 'investor_reply',
+                    routed_to_agent: 'julia',
+                    artur_brief: `${investor.name} replied — sentiment: ${sentiment}`,
+                    lilit_task_id: null,
+                  },
+                  draft_id: null,
+                  processing_status: 'received',
+                  processing_error: null,
+                  cost_usd: 0,
+                });
+                await replyInboxItem.save();
+                logger.info({ investorId: investor._id, name: investor.name }, 'reply InboxItem created for julia');
+              } catch (inboxErr) {
+                logger.warn({
+                  error: inboxErr instanceof Error ? inboxErr.message : String(inboxErr),
+                  investorId: investor._id,
+                }, 'failed to create reply InboxItem - reply is still recorded on the investor record');
+              }
+
               // Auto-dismiss any pending follow-up drafts for this investor
               const pendingFollowUpDrafts = await emailDraftRepo.find({
                 investorId: investor._id,
@@ -599,8 +652,61 @@ export function defineJob(agenda: Agenda): void {
   });
 }
 
+// --------------------------------------------------------------------------
+// 2026-07-15: added a test-mode fast interval alongside the existing 09:00/
+// 17:00 Europe/Prague Agenda cron (unchanged for production). Reuses the same
+// FOLLOWUP_1_TEST_MINUTES / FOLLOWUP_2_TEST_MINUTES env vars that put
+// investor.followUpScheduler into test mode as the signal here too — when
+// either is set, Artur is actively running a fast manual-send test cycle
+// (minutes, not business days) and waiting up to 8 hours for the next cron
+// tick to detect a sent email would silently stall the whole follow-up chain,
+// forcing a manual "Check Gmail" click after every send. In test mode this
+// job now runs on a self-managed setInterval every 60s instead, matching
+// investor.followUpScheduler's own test-mode tick rate, so sent-status and
+// reply detection stay current automatically. Production behavior (the
+// twice-daily Agenda cron) is untouched — this job hasn't shown the Agenda
+// reliability issue that forced followUpScheduler off Agenda entirely, so
+// there's no reason to change the production path.
+// --------------------------------------------------------------------------
+
+let schedulerTimer: ReturnType<typeof setInterval> | null = null;
+
 export async function scheduleJob(agenda: Agenda): Promise<void> {
-  // Run twice daily at 09:00 and 17:00 Europe/Prague
-  await agenda.every('0 9,17 * * *', JOB_NAME, {}, { timezone: 'Europe/Prague' });
-  logger.info('scheduled gmail send status sync job for 09:00 and 17:00 Europe/Prague');
+  // Read env vars at schedule time (not module load time) to pick up Railway changes.
+  const followup1TestMinutes = process.env['FOLLOWUP_1_TEST_MINUTES']
+    ? parseInt(process.env['FOLLOWUP_1_TEST_MINUTES'], 10)
+    : null;
+  const followup2TestMinutes = process.env['FOLLOWUP_2_TEST_MINUTES']
+    ? parseInt(process.env['FOLLOWUP_2_TEST_MINUTES'], 10)
+    : null;
+  const isTestMode = followup1TestMinutes !== null || followup2TestMinutes !== null;
+
+  logger.info(`[gmail-send-status-sync] startup config: isTestMode=${isTestMode}`);
+
+  // Clean up any stale Agenda-scheduled job so switching modes never leaves a
+  // duplicate/competing execution path (mirrors followUpScheduler's approach).
+  const cancelledCount = await agenda.cancel({ name: JOB_NAME });
+  logger.info(`[gmail-send-status-sync] cancelled ${cancelledCount} existing Agenda job(s) for ${JOB_NAME} before rescheduling`);
+
+  if (schedulerTimer) {
+    clearInterval(schedulerTimer);
+    schedulerTimer = null;
+  }
+
+  if (isTestMode) {
+    const tickIntervalMs = 60_000;
+    const runTick = (): void => {
+      void runGmailSendStatusSync().catch(err => {
+        logger.error({ err: err instanceof Error ? err.message : String(err) }, '[gmail-send-status-sync] interval tick threw unexpectedly');
+      });
+    };
+    schedulerTimer = setInterval(runTick, tickIntervalMs);
+    // Run one check immediately instead of waiting a full interval.
+    runTick();
+    logger.info(`[gmail-send-status-sync] TEST MODE: scheduled via local setInterval every ${tickIntervalMs}ms (no manual "Check Gmail" click needed)`);
+  } else {
+    // Run twice daily at 09:00 and 17:00 Europe/Prague — unchanged production behavior.
+    await agenda.every('0 9,17 * * *', JOB_NAME, {}, { timezone: 'Europe/Prague' });
+    logger.info('[gmail-send-status-sync] scheduled gmail send status sync job for 09:00 and 17:00 Europe/Prague');
+  }
 }
