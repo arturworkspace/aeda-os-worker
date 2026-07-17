@@ -377,7 +377,7 @@ PHASE 2: AGENT-SPECIFIC PROFESSIONAL UPDATES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 After completing Phase 1, research and write entries FOR EACH
-of these 12 agents. You MUST call write_knowledge_entry with
+of these 20 agents. You MUST call write_knowledge_entry with
 agentScope set to the agent's ID for these entries.
 
 For EACH agent below, research their professional domain and
@@ -436,6 +436,27 @@ vagho (Security):
 laura (Partnerships):
   → Privy, Turnkey, Dynamic wallet SDKs, embedded wallet trends
   → Non-custodial wallet infrastructure, KYC provider updates
+
+lilit (Project Management):
+  → Agile/Scrum methodology updates, OKR frameworks, delivery tools
+  → Remote team management, AI-assisted project management trends
+
+karo (QA):
+  → QA automation tooling, testing frameworks (Jest, Playwright, Detox)
+  → Mobile app testing, API testing best practices, CI/CD testing
+
+syuzi (Payments & Settlement):
+  → Circle/EURC updates, Bridge.xyz changes, corridor partner pricing
+  → SEPA fee changes, FX spread trends, stablecoin settlement news
+
+julia (Fundraising & IR):
+  → Pre-seed/seed market signals, accelerator deadlines (EIC, Techstars)
+  → VC funding patterns for EU fintech, data room best practices
+  → NOTE: Check overlap with Phase 1 market-funding domain before writing
+
+ofelya (Brand & UX Auditor):
+  → Brand audit standards, competitor creative benchmarking
+  → Marketing effectiveness metrics, SEO audit methodology
 
 CRITICAL: For Phase 2, every write_knowledge_entry call MUST include
 agentScope: '<agent-id>' (e.g., agentScope: 'vagho'). Entries without
