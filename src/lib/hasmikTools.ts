@@ -48,12 +48,97 @@ function hasValidContentUrlPattern(url: string): boolean {
   }
 }
 
+// Soft 404 indicators - phrases that indicate the page content is a "not found" page
+// even though HTTP status is 200
+const SOFT_404_INDICATORS = [
+  'page not found',
+  'report not found',
+  'article not found',
+  'post not found',
+  'content not found',
+  'this page doesn\'t exist',
+  'this page does not exist',
+  'we couldn\'t find',
+  'we could not find',
+  'the page you requested',
+  'the page you\'re looking for',
+  'the page you are looking for',
+  'sorry, we can\'t find',
+  'sorry, we cannot find',
+  'oops! page not found',
+  'error 404',
+  '404 error',
+  '404 - ',
+  ' 404 ',
+];
+
+/**
+ * Check if page content indicates a soft 404 (200 status but "not found" content)
+ */
+function isSoft404Content(html: string): boolean {
+  // Check entire page content (up to 100KB) since "not found" can be anywhere
+  const lowerHtml = html.toLowerCase().slice(0, 100000);
+
+  // Check for soft 404 indicators
+  for (const indicator of SOFT_404_INDICATORS) {
+    if (lowerHtml.includes(indicator)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Check if the page redirected to a generic listing/category page
+ */
+function isGenericRedirect(originalUrl: string, finalUrl: string): boolean {
+  try {
+    const originalPath = new URL(originalUrl).pathname;
+    const finalPath = new URL(finalUrl).pathname;
+
+    // No redirect happened
+    if (originalPath === finalPath) return false;
+
+    // Redirected to homepage
+    if (finalPath === '/' || finalPath === '') return true;
+
+    // Generic listing paths that indicate "not found" redirect
+    const genericPaths = [
+      '/blog', '/blog/', '/blogs', '/blogs/',
+      '/reports', '/reports/',
+      '/news', '/news/',
+      '/press', '/press/',
+      '/articles', '/articles/',
+      '/posts', '/posts/',
+      '/resources', '/resources/',
+    ];
+
+    // Check if final path is a generic listing
+    if (genericPaths.some(p => finalPath === p || finalPath.endsWith(p))) {
+      return true;
+    }
+
+    // If path got significantly shorter (lost the specific article slug)
+    const originalSegments = originalPath.split('/').filter(Boolean).length;
+    const finalSegments = finalPath.split('/').filter(Boolean).length;
+    if (originalSegments > 1 && finalSegments < originalSegments) {
+      return true;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 interface UrlVerifyResult {
   valid: boolean;
   finalUrl?: string;
   reason?: string;
   botProtected?: boolean;  // True if URL is on a bot-defensive domain
   patternValid?: boolean;  // True if URL matches expected content pattern
+  softRedirect?: boolean;  // True if detected as soft 404
 }
 
 /**
@@ -62,6 +147,9 @@ interface UrlVerifyResult {
  * or { valid: false, reason } if it 404s, redirects to unrelated page, or fails.
  * For bot-defensive domains, returns { botProtected: true, patternValid: bool }
  * instead of forcing a pass/fail verdict.
+ *
+ * Now includes soft-redirect detection: checks page content for "not found"
+ * indicators even when HTTP status is 200.
  */
 async function verifyUrlExists(url: string): Promise<UrlVerifyResult> {
   if (!url || !url.startsWith('http')) {
@@ -72,15 +160,16 @@ async function verifyUrlExists(url: string): Promise<UrlVerifyResult> {
   const isBotDefensive = isBotDefensiveDomain(url);
 
   try {
-    // Use fetch with a short timeout and follow redirects
+    // Use GET instead of HEAD to enable soft-404 content detection
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
+    const timeout = setTimeout(() => controller.abort(), 10000);
 
     const response = await fetch(url, {
-      method: 'HEAD',  // HEAD is faster, most servers support it
+      method: 'GET',
       signal: controller.signal,
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; AedaBot/1.0; +https://aedawallet.com)',
+        'Accept': 'text/html',
       },
       redirect: 'follow',
     });
@@ -89,7 +178,6 @@ async function verifyUrlExists(url: string): Promise<UrlVerifyResult> {
 
     // Check for success status
     if (response.status >= 200 && response.status < 400) {
-      // Check if we were redirected to a generic error page or homepage
       const finalUrl = response.url;
       const originalHost = new URL(url).hostname;
       const finalHost = new URL(finalUrl).hostname;
@@ -100,10 +188,15 @@ async function verifyUrlExists(url: string): Promise<UrlVerifyResult> {
         return { valid: false, reason: `Redirected to different domain: ${finalHost}` };
       }
 
-      // If redirected to just the homepage (no path), likely a 404 soft-redirect
-      const finalPath = new URL(finalUrl).pathname;
-      if (finalPath === '/' && new URL(url).pathname !== '/') {
-        return { valid: false, reason: 'Redirected to homepage (soft 404)' };
+      // Check for generic redirect (e.g., /blog/specific-post → /blog)
+      if (isGenericRedirect(url, finalUrl)) {
+        return { valid: false, reason: 'Redirected to generic page (soft 404)', softRedirect: true };
+      }
+
+      // Check page content for soft 404 indicators
+      const html = await response.text();
+      if (isSoft404Content(html)) {
+        return { valid: false, reason: 'Page content indicates not found (soft 404)', softRedirect: true };
       }
 
       return { valid: true, finalUrl };
@@ -123,47 +216,6 @@ async function verifyUrlExists(url: string): Promise<UrlVerifyResult> {
     return { valid: false, reason: `HTTP ${response.status}` };
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
-
-    // Some sites block HEAD requests, try GET as fallback
-    if (msg.includes('Method Not Allowed') || msg.includes('405')) {
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000);
-        const response = await fetch(url, {
-          method: 'GET',
-          signal: controller.signal,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (compatible; AedaBot/1.0; +https://aedawallet.com)',
-          },
-          redirect: 'follow',
-        });
-        clearTimeout(timeout);
-
-        if (response.status >= 200 && response.status < 400) {
-          return { valid: true, finalUrl: response.url };
-        }
-
-        if (isBotDefensive) {
-          return {
-            valid: false,
-            reason: `Bot-protected domain (HTTP ${response.status})`,
-            botProtected: true,
-            patternValid: hasValidContentUrlPattern(url),
-          };
-        }
-        return { valid: false, reason: `HTTP ${response.status}` };
-      } catch (e2) {
-        if (isBotDefensive) {
-          return {
-            valid: false,
-            reason: `Bot-protected domain (${e2 instanceof Error ? e2.message : 'request failed'})`,
-            botProtected: true,
-            patternValid: hasValidContentUrlPattern(url),
-          };
-        }
-        return { valid: false, reason: e2 instanceof Error ? e2.message : 'GET fallback failed' };
-      }
-    }
 
     // For bot-defensive domains, network errors are common (bot blocking)
     if (isBotDefensive) {
@@ -246,10 +298,12 @@ export async function writeKnowledgeEntry(input: {
 
   // URL VERIFICATION: For entries with sourceUrl, verify the URL actually exists
   // This prevents hallucinated/fabricated URLs from being stored as authoritative sources
+  // Also detects soft-404s (pages that return 200 but contain "not found" content)
   let urlVerified = false;
   let urlVerificationReason = '';
   let urlBotProtected = false;
   let urlPatternValid = false;
+  let urlSoftRedirect = false;
   let finalSourceUrl = input.sourceUrl || '';
 
   if (input.sourceUrl) {
@@ -258,6 +312,7 @@ export async function writeKnowledgeEntry(input: {
     urlVerificationReason = verification.reason || '';
     urlBotProtected = verification.botProtected || false;
     urlPatternValid = verification.patternValid || false;
+    urlSoftRedirect = verification.softRedirect || false;
 
     if (verification.valid && verification.finalUrl) {
       // Use the final URL after redirects (in case of URL shorteners, etc.)
@@ -339,7 +394,8 @@ export async function writeKnowledgeEntry(input: {
   }
   // Add unverifiable warning to content if URL check failed (but not for bot-protected with valid pattern)
   if (input.sourceUrl && !urlVerified && !(urlBotProtected && urlPatternValid)) {
-    finalContent = `[Source URL unverifiable]: ${finalContent}`;
+    const warningType = urlSoftRedirect ? '[Source URL soft 404]' : '[Source URL unverifiable]';
+    finalContent = `${warningType}: ${finalContent}`;
   } else if (urlBotProtected && urlPatternValid) {
     finalContent = `[Bot-protected source — cannot verify automatically]: ${finalContent}`;
   }
@@ -359,6 +415,7 @@ export async function writeKnowledgeEntry(input: {
     sourceUrlVerified: urlVerified,
     sourceUrlBotProtected: urlBotProtected,
     sourceUrlPatternValid: urlPatternValid,
+    sourceUrlSoftRedirect: urlSoftRedirect,
     sourceUrlVerificationError: urlVerified ? null : urlVerificationReason,
     isOpinion: input.isOpinion || false,
     authorName: input.authorName || '',
