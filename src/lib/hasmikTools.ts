@@ -1,5 +1,83 @@
 import { getDb } from './db.js';
 
+/**
+ * Verify a URL actually exists and returns content.
+ * Returns { valid: true, finalUrl } if the URL resolves to real content,
+ * or { valid: false, reason } if it 404s, redirects to unrelated page, or fails.
+ */
+async function verifyUrlExists(url: string): Promise<{ valid: boolean; finalUrl?: string; reason?: string }> {
+  if (!url || !url.startsWith('http')) {
+    return { valid: false, reason: 'Invalid or missing URL' };
+  }
+
+  try {
+    // Use fetch with a short timeout and follow redirects
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
+    const response = await fetch(url, {
+      method: 'HEAD',  // HEAD is faster, most servers support it
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; AedaBot/1.0; +https://aedawallet.com)',
+      },
+      redirect: 'follow',
+    });
+
+    clearTimeout(timeout);
+
+    // Check for success status
+    if (response.status >= 200 && response.status < 400) {
+      // Check if we were redirected to a generic error page or homepage
+      const finalUrl = response.url;
+      const originalHost = new URL(url).hostname;
+      const finalHost = new URL(finalUrl).hostname;
+
+      // If redirected to a different domain entirely, suspicious
+      const originalBase = originalHost.split('.')[0];
+      if (originalHost !== finalHost && originalBase && !finalHost.includes(originalBase)) {
+        return { valid: false, reason: `Redirected to different domain: ${finalHost}` };
+      }
+
+      // If redirected to just the homepage (no path), likely a 404 soft-redirect
+      const finalPath = new URL(finalUrl).pathname;
+      if (finalPath === '/' && new URL(url).pathname !== '/') {
+        return { valid: false, reason: 'Redirected to homepage (soft 404)' };
+      }
+
+      return { valid: true, finalUrl };
+    }
+
+    return { valid: false, reason: `HTTP ${response.status}` };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : 'Unknown error';
+    // Some sites block HEAD requests, try GET as fallback
+    if (msg.includes('Method Not Allowed') || msg.includes('405')) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        const response = await fetch(url, {
+          method: 'GET',
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; AedaBot/1.0; +https://aedawallet.com)',
+          },
+          redirect: 'follow',
+        });
+        clearTimeout(timeout);
+
+        if (response.status >= 200 && response.status < 400) {
+          return { valid: true, finalUrl: response.url };
+        }
+        return { valid: false, reason: `HTTP ${response.status}` };
+      } catch (e2) {
+        return { valid: false, reason: e2 instanceof Error ? e2.message : 'GET fallback failed' };
+      }
+    }
+    return { valid: false, reason: msg };
+  }
+}
+
 const OFFICIAL_DOMAINS = [
   'eba.europa.eu', 'esma.europa.eu', 'ec.europa.eu', 'ecb.europa.eu',
   'eur-lex.europa.eu', 'fatf-gafi.org', 'moneyval.coe.int',
@@ -65,15 +143,43 @@ export async function writeKnowledgeEntry(input: {
     return `BLOCKED: sourceType '${input.sourceType}' is not permitted in the knowledge base. Use write_inbox_signal instead.`;
   }
 
-  const urlClass = classifySourceUrl(input.sourceUrl || '');
+  // URL VERIFICATION: For entries with sourceUrl, verify the URL actually exists
+  // This prevents hallucinated/fabricated URLs from being stored as authoritative sources
+  let urlVerified = false;
+  let urlVerificationReason = '';
+  let finalSourceUrl = input.sourceUrl || '';
+
+  if (input.sourceUrl) {
+    const verification = await verifyUrlExists(input.sourceUrl);
+    urlVerified = verification.valid;
+    urlVerificationReason = verification.reason || '';
+
+    if (verification.valid && verification.finalUrl) {
+      // Use the final URL after redirects (in case of URL shorteners, etc.)
+      finalSourceUrl = verification.finalUrl;
+    }
+  }
+
+  const urlClass = classifySourceUrl(finalSourceUrl);
   let enforcedTrustLevel = input.trustLevel;
   let enforcedVerificationStatus = input.verificationStatus || 'pending';
+
+  // If URL was provided but failed verification, downgrade trust level
+  if (input.sourceUrl && !urlVerified) {
+    // For high-trust entries (verified/informational), a bad URL is disqualifying
+    if (input.trustLevel === 'verified' || input.trustLevel === 'informational') {
+      enforcedTrustLevel = 'signal';
+      enforcedVerificationStatus = 'pending'; // Mark as pending since we can't verify
+      // Clear the bad URL - don't store a 404 link
+      finalSourceUrl = '';
+    }
+  }
 
   if (input.trustLevel === 'verified' && urlClass !== 'official') {
     enforcedTrustLevel = 'informational';
     enforcedVerificationStatus = 'pending';
   }
-  if (urlClass === 'official') {
+  if (urlClass === 'official' && urlVerified) {
     enforcedTrustLevel = 'verified';
     enforcedVerificationStatus = 'confirmed';
   }
@@ -89,6 +195,12 @@ export async function writeKnowledgeEntry(input: {
   let score = Math.max(1, Math.min(10, Math.round(input.signalScore)));
   if (input.sourceType === 'linkedin_expert') score = Math.min(score, 6);
   if (input.sourceType === 'company') score = Math.min(score, 5);
+
+  // Downgrade score if URL verification failed
+  if (input.sourceUrl && !urlVerified && score > 5) {
+    score = 5; // Cap at 5 for unverifiable sources
+  }
+
   if (score <= 3) {
     return `BLOCKED: signalScore ${score} ≤ 3. Entry is noise. Do not write.`;
   }
@@ -97,12 +209,21 @@ export async function writeKnowledgeEntry(input: {
     return `BLOCKED: signalScore ${score} requires a sourceUrl. Provide a direct source URL or lower the score.`;
   }
 
+  // Block high-score entries with failed URL verification
+  if (score >= 7 && input.sourceUrl && !urlVerified) {
+    return `BLOCKED: sourceUrl "${input.sourceUrl}" failed verification (${urlVerificationReason}). High-score entries require working source URLs. Either find the correct URL or lower the score.`;
+  }
+
   let finalContent = input.content;
   if (input.isOpinion && input.authorName) {
     finalContent = `[Opinion — ${input.authorName}]: ${input.content}`;
   }
   if (input.sourceType === 'company') {
     finalContent = `[Self-reported, unverified]: ${input.content}`;
+  }
+  // Add unverifiable warning to content if URL check failed
+  if (input.sourceUrl && !urlVerified) {
+    finalContent = `[Source URL unverifiable]: ${finalContent}`;
   }
 
   const doc = {
@@ -116,7 +237,9 @@ export async function writeKnowledgeEntry(input: {
     trustLevel: enforcedTrustLevel,
     verificationStatus: enforcedVerificationStatus,
     sourceType: input.sourceType,
-    source: input.sourceUrl || '',
+    source: finalSourceUrl,
+    sourceUrlVerified: urlVerified,
+    sourceUrlVerificationError: urlVerified ? null : urlVerificationReason,
     isOpinion: input.isOpinion || false,
     authorName: input.authorName || '',
     tags: input.tags || [],
@@ -137,7 +260,11 @@ export async function writeKnowledgeEntry(input: {
   };
 
   await collection.insertOne(doc);
-  return `Saved: "${input.title}" — score:${score}, trust:${enforcedTrustLevel}, status:${enforcedVerificationStatus}, source:${input.sourceType}`;
+
+  const verifyNote = input.sourceUrl
+    ? (urlVerified ? ', URL verified' : `, URL FAILED: ${urlVerificationReason}`)
+    : '';
+  return `Saved: "${input.title}" — score:${score}, trust:${enforcedTrustLevel}, status:${enforcedVerificationStatus}, source:${input.sourceType}${verifyNote}`;
 }
 
 export async function writeFundraisingRound(input: {
@@ -156,6 +283,12 @@ export async function writeFundraisingRound(input: {
 
   if (input.sourceUrl.includes('linkedin.com')) {
     return `REJECTED: LinkedIn is not an acceptable source for fundraising rounds. Find a Crunchbase, TechCrunch, or official press release URL. A founder announcing their own round on LinkedIn is not verified intelligence.`;
+  }
+
+  // Verify the sourceUrl actually exists
+  const sourceVerify = await verifyUrlExists(input.sourceUrl);
+  if (!sourceVerify.valid) {
+    return `REJECTED: sourceUrl "${input.sourceUrl}" failed verification (${sourceVerify.reason}). Fundraising rounds require working source URLs.`;
   }
 
   if (!input.investors.length ||
@@ -198,15 +331,16 @@ export async function writeFundraisingRound(input: {
     investors: input.investors.map(name => ({ name, firm: name })),
     category: input.sector,
     relevanceToAeda: input.relevance,
-    sourceUrl: input.sourceUrl,
+    sourceUrl: sourceVerify.finalUrl || input.sourceUrl,
     announcedDate: input.announcedDate,
     weekOf: weekStart,
     addedBy: 'hasmik',
     createdAt: new Date(),
     addedToPipeline: false,
+    sourceUrlVerified: true,
   });
 
-  return `Saved round: ${input.company} — ${input.amount} ${input.round} (announced: ${input.announcedDate})`;
+  return `Saved round: ${input.company} — ${input.amount} ${input.round} (announced: ${input.announcedDate}) — URL verified`;
 }
 
 export async function writeFundingOpportunity(input: {
@@ -229,11 +363,39 @@ export async function writeFundingOpportunity(input: {
     return `SKIPPED: "${input.name}" already exists in funding opportunities.`;
   }
 
+  // Verify sourceUrl actually exists (required field)
+  const sourceVerify = await verifyUrlExists(input.sourceUrl);
+  if (!sourceVerify.valid) {
+    return `BLOCKED: sourceUrl "${input.sourceUrl}" failed verification (${sourceVerify.reason}). Funding opportunities require working source URLs.`;
+  }
+
   // URL hygiene: applyUrl must trace back to something the model actually
   // saw in web_search results (sourceUrl is required for that reason). If
   // applyUrl was omitted, fall back to the verified homepage rather than
   // leaving the Apply button pointed at nothing.
-  const applicationUrl = input.applyUrl || input.website || '';
+  let applicationUrl = input.applyUrl || input.website || '';
+
+  // Verify applyUrl if provided
+  if (input.applyUrl) {
+    const applyVerify = await verifyUrlExists(input.applyUrl);
+    if (!applyVerify.valid) {
+      // Fall back to website or sourceUrl instead of storing a bad link
+      applicationUrl = input.website || input.sourceUrl;
+    } else if (applyVerify.finalUrl) {
+      applicationUrl = applyVerify.finalUrl;
+    }
+  }
+
+  // Verify website if provided
+  let verifiedWebsite = input.website || '';
+  if (input.website) {
+    const websiteVerify = await verifyUrlExists(input.website);
+    if (websiteVerify.valid && websiteVerify.finalUrl) {
+      verifiedWebsite = websiteVerify.finalUrl;
+    } else if (!websiteVerify.valid) {
+      verifiedWebsite = ''; // Clear bad website URL
+    }
+  }
 
   await collection.insertOne({
     weekOf: new Date(),
@@ -243,9 +405,9 @@ export async function writeFundingOpportunity(input: {
     deadline: input.deadline || 'Rolling',
     fundingAmount: input.amount || '',
     eligibilityReasoning: input.eligibility,
-    website: input.website || '',
+    website: verifiedWebsite,
     applicationUrl,
-    sourceUrl: input.sourceUrl,
+    sourceUrl: sourceVerify.finalUrl || input.sourceUrl,
     geography: [input.region],
     status: 'open',
     dismissed: false,
@@ -256,9 +418,10 @@ export async function writeFundingOpportunity(input: {
     archived: false,
     addedBy: 'hasmik',
     createdAt: new Date(),
+    urlsVerified: true,
   });
 
-  return `Saved opportunity: ${input.name} (${input.type} — ${input.provider})`;
+  return `Saved opportunity: ${input.name} (${input.type} — ${input.provider}) — URLs verified`;
 }
 
 export async function writeInboxSignal(input: {
