@@ -1,14 +1,75 @@
 import { getDb } from './db.js';
 
+// Bot-defensive domains that block/challenge automated requests
+// These need special handling - can't reliably verify via HTTP alone
+const BOT_DEFENSIVE_DOMAINS = [
+  'linkedin.com',
+  'twitter.com',
+  'x.com',
+  'facebook.com',
+  'instagram.com',
+  'medium.com',      // Often returns 403 to bots
+  'substack.com',    // Sometimes rate-limits
+  'bloomberg.com',   // Paywall + bot detection
+  'ft.com',          // Paywall + bot detection
+  'wsj.com',         // Paywall + bot detection
+  'reuters.com',     // Sometimes blocks bots
+];
+
+// URL patterns that indicate a specific content item (not just homepage)
+const CONTENT_URL_PATTERNS: Record<string, RegExp> = {
+  'linkedin.com': /linkedin\.com\/(posts|pulse|feed\/update|in\/[^/]+\/recent-activity)/i,
+  'twitter.com': /twitter\.com\/[^/]+\/status\/\d+/i,
+  'x.com': /x\.com\/[^/]+\/status\/\d+/i,
+  'medium.com': /medium\.com\/@?[^/]+\/[a-z0-9-]+-[a-f0-9]+$/i,
+  'substack.com': /[^.]+\.substack\.com\/p\//i,
+};
+
+function isBotDefensiveDomain(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return BOT_DEFENSIVE_DOMAINS.some(d => hostname === d || hostname.endsWith('.' + d));
+  } catch {
+    return false;
+  }
+}
+
+function hasValidContentUrlPattern(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    for (const [domain, pattern] of Object.entries(CONTENT_URL_PATTERNS)) {
+      if ((hostname === domain || hostname.endsWith('.' + domain)) && pattern.test(url)) {
+        return true;
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+interface UrlVerifyResult {
+  valid: boolean;
+  finalUrl?: string;
+  reason?: string;
+  botProtected?: boolean;  // True if URL is on a bot-defensive domain
+  patternValid?: boolean;  // True if URL matches expected content pattern
+}
+
 /**
  * Verify a URL actually exists and returns content.
  * Returns { valid: true, finalUrl } if the URL resolves to real content,
  * or { valid: false, reason } if it 404s, redirects to unrelated page, or fails.
+ * For bot-defensive domains, returns { botProtected: true, patternValid: bool }
+ * instead of forcing a pass/fail verdict.
  */
-async function verifyUrlExists(url: string): Promise<{ valid: boolean; finalUrl?: string; reason?: string }> {
+async function verifyUrlExists(url: string): Promise<UrlVerifyResult> {
   if (!url || !url.startsWith('http')) {
     return { valid: false, reason: 'Invalid or missing URL' };
   }
+
+  // Check if this is a bot-defensive domain
+  const isBotDefensive = isBotDefensiveDomain(url);
 
   try {
     // Use fetch with a short timeout and follow redirects
@@ -48,9 +109,21 @@ async function verifyUrlExists(url: string): Promise<{ valid: boolean; finalUrl?
       return { valid: true, finalUrl };
     }
 
+    // For bot-defensive domains, a non-200 doesn't mean the URL is fake
+    if (isBotDefensive) {
+      const patternValid = hasValidContentUrlPattern(url);
+      return {
+        valid: false,
+        reason: `Bot-protected domain (HTTP ${response.status})`,
+        botProtected: true,
+        patternValid,
+      };
+    }
+
     return { valid: false, reason: `HTTP ${response.status}` };
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
+
     // Some sites block HEAD requests, try GET as fallback
     if (msg.includes('Method Not Allowed') || msg.includes('405')) {
       try {
@@ -69,11 +142,39 @@ async function verifyUrlExists(url: string): Promise<{ valid: boolean; finalUrl?
         if (response.status >= 200 && response.status < 400) {
           return { valid: true, finalUrl: response.url };
         }
+
+        if (isBotDefensive) {
+          return {
+            valid: false,
+            reason: `Bot-protected domain (HTTP ${response.status})`,
+            botProtected: true,
+            patternValid: hasValidContentUrlPattern(url),
+          };
+        }
         return { valid: false, reason: `HTTP ${response.status}` };
       } catch (e2) {
+        if (isBotDefensive) {
+          return {
+            valid: false,
+            reason: `Bot-protected domain (${e2 instanceof Error ? e2.message : 'request failed'})`,
+            botProtected: true,
+            patternValid: hasValidContentUrlPattern(url),
+          };
+        }
         return { valid: false, reason: e2 instanceof Error ? e2.message : 'GET fallback failed' };
       }
     }
+
+    // For bot-defensive domains, network errors are common (bot blocking)
+    if (isBotDefensive) {
+      return {
+        valid: false,
+        reason: `Bot-protected domain (${msg})`,
+        botProtected: true,
+        patternValid: hasValidContentUrlPattern(url),
+      };
+    }
+
     return { valid: false, reason: msg };
   }
 }
@@ -147,12 +248,16 @@ export async function writeKnowledgeEntry(input: {
   // This prevents hallucinated/fabricated URLs from being stored as authoritative sources
   let urlVerified = false;
   let urlVerificationReason = '';
+  let urlBotProtected = false;
+  let urlPatternValid = false;
   let finalSourceUrl = input.sourceUrl || '';
 
   if (input.sourceUrl) {
     const verification = await verifyUrlExists(input.sourceUrl);
     urlVerified = verification.valid;
     urlVerificationReason = verification.reason || '';
+    urlBotProtected = verification.botProtected || false;
+    urlPatternValid = verification.patternValid || false;
 
     if (verification.valid && verification.finalUrl) {
       // Use the final URL after redirects (in case of URL shorteners, etc.)
@@ -164,12 +269,23 @@ export async function writeKnowledgeEntry(input: {
   let enforcedTrustLevel = input.trustLevel;
   let enforcedVerificationStatus = input.verificationStatus || 'pending';
 
-  // If URL was provided but failed verification, downgrade trust level
-  if (input.sourceUrl && !urlVerified) {
-    // For high-trust entries (verified/informational), a bad URL is disqualifying
+  // Handle bot-protected domains differently - don't auto-downgrade
+  if (input.sourceUrl && urlBotProtected) {
+    // If URL pattern matches expected format, keep it but mark as unverifiable
+    if (urlPatternValid) {
+      enforcedVerificationStatus = 'pending';
+      // Keep the URL - it looks legitimate but we can't verify via HTTP
+    } else {
+      // Pattern doesn't match - likely fabricated
+      enforcedTrustLevel = 'signal';
+      enforcedVerificationStatus = 'pending';
+      finalSourceUrl = '';
+    }
+  } else if (input.sourceUrl && !urlVerified) {
+    // Non-bot-protected domain failed verification - definitely bad
     if (input.trustLevel === 'verified' || input.trustLevel === 'informational') {
       enforcedTrustLevel = 'signal';
-      enforcedVerificationStatus = 'pending'; // Mark as pending since we can't verify
+      enforcedVerificationStatus = 'pending';
       // Clear the bad URL - don't store a 404 link
       finalSourceUrl = '';
     }
@@ -209,8 +325,8 @@ export async function writeKnowledgeEntry(input: {
     return `BLOCKED: signalScore ${score} requires a sourceUrl. Provide a direct source URL or lower the score.`;
   }
 
-  // Block high-score entries with failed URL verification
-  if (score >= 7 && input.sourceUrl && !urlVerified) {
+  // Block high-score entries with failed URL verification (unless bot-protected with valid pattern)
+  if (score >= 7 && input.sourceUrl && !urlVerified && !(urlBotProtected && urlPatternValid)) {
     return `BLOCKED: sourceUrl "${input.sourceUrl}" failed verification (${urlVerificationReason}). High-score entries require working source URLs. Either find the correct URL or lower the score.`;
   }
 
@@ -221,9 +337,11 @@ export async function writeKnowledgeEntry(input: {
   if (input.sourceType === 'company') {
     finalContent = `[Self-reported, unverified]: ${input.content}`;
   }
-  // Add unverifiable warning to content if URL check failed
-  if (input.sourceUrl && !urlVerified) {
+  // Add unverifiable warning to content if URL check failed (but not for bot-protected with valid pattern)
+  if (input.sourceUrl && !urlVerified && !(urlBotProtected && urlPatternValid)) {
     finalContent = `[Source URL unverifiable]: ${finalContent}`;
+  } else if (urlBotProtected && urlPatternValid) {
+    finalContent = `[Bot-protected source — cannot verify automatically]: ${finalContent}`;
   }
 
   const doc = {
@@ -239,6 +357,8 @@ export async function writeKnowledgeEntry(input: {
     sourceType: input.sourceType,
     source: finalSourceUrl,
     sourceUrlVerified: urlVerified,
+    sourceUrlBotProtected: urlBotProtected,
+    sourceUrlPatternValid: urlPatternValid,
     sourceUrlVerificationError: urlVerified ? null : urlVerificationReason,
     isOpinion: input.isOpinion || false,
     authorName: input.authorName || '',
