@@ -54,7 +54,25 @@
       "Bash(cat middleware.ts)",
       "Bash(ls -la src/middleware.ts)",
       "Bash(cat src/middleware.ts)",
-      "Bash(npx next *)"
+      "Bash(npx next *)",
+      "Bash(nslookup os.aedawallet.com)",
+      "Bash(echo \"Exit code: $?\")",
+      "Bash(npm ls *)",
+      "Bash(cat vercel.json)",
+      "Bash(cat .vercelignore)",
+      "Bash(awk '/^export const SHARED_CONTEXT_COMPACT/,/^\\\\`$/{print}' shared.ts)",
+      "Bash(awk '/^export const SHARED_CONTEXT_1ON1/,/^`;$/{print}' shared.ts)",
+      "Bash(mkdir -p scripts)",
+      "Bash(mv scripts/audit-kb-urls.ts scripts/audit-kb-urls.ts)",
+      "Bash(railway whoami *)",
+      "Bash(pkill -f \"tsx.*full-audit\")",
+      "Bash(pkill -f \"tsx.*fix-soft-redirects\")",
+      "Bash(vercel build *)",
+      "Bash(rm -rf .next)",
+      "Bash(rm -rf .vercel/output)",
+      "Bash(vercel --prod --force)",
+      "Bash(vercel pull *)",
+      "Bash(grep -A 20 \"Room: \\\\${room.name}\")"
     ]
   }
 }

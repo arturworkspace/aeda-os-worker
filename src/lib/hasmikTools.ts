@@ -271,6 +271,144 @@ function classifySourceUrl(url: string): 'official' | 'media' | 'other' {
   return 'other';
 }
 
+// Known entities for subject fingerprinting
+const KNOWN_ENTITIES = [
+  // Competitors - Stablecoin Apps
+  'rizon', 'sling money', 'sling', 'zixi pay', 'zixi', 'parsek', 'pexx',
+  'dollarize', 'dolarapp', 'stables', 'bmoni', 'payy', 'sentz',
+  // Competitors - Remittance
+  'wise', 'revolut', 'swift', 'visa', 'mastercard', 'remitly',
+  'moneygram', 'western union',
+  // Regulators
+  'esma', 'eba', 'ecb', 'european commission', 'ec', 'sec', 'cftc',
+  'fincen', 'cnb', 'cba', 'fatf', 'moneyval',
+  // Technology
+  'solana', 'circle', 'eurc', 'usdc', 'bridge', 'sumsub', 'helius',
+  // Partners
+  'sky labs', 'bridge.xyz',
+  // Corridors
+  'armenia', 'georgia', 'kazakhstan', 'uzbekistan',
+];
+
+// Claim types for subject fingerprinting
+const CLAIM_PATTERNS: Array<{ pattern: RegExp; type: string }> = [
+  { pattern: /\b(re-?enter|re-?entry|return|back)\b/i, type: 'corridor-reentry' },
+  { pattern: /\b(exit|left|withdrew|no longer)\b/i, type: 'corridor-exit' },
+  { pattern: /\b(not|no|hasn't|does not|hasn't|doesn't)\b.*\b(serve|support|available)/i, type: 'corridor-gap' },
+  { pattern: /\b(raised?|funding|round|series [a-c]|pre-?seed|seed)\b/i, type: 'funding' },
+  { pattern: /\b(launch|launched|announce|announced|release)\b/i, type: 'product-launch' },
+  { pattern: /\b(guidance|regulation|rule|enforcement|fine)\b/i, type: 'regulation' },
+  { pattern: /\b(pricing|fee|rate|cost)\b.*\b(change|update|increase|decrease)/i, type: 'pricing-change' },
+];
+
+/**
+ * Extract a subject fingerprint from a knowledge entry for dedup purposes.
+ * Format: "category:entity:claim_type" e.g. "competitor:wise:corridor-gap"
+ * Returns null if no clear entity or claim type can be identified.
+ */
+function extractSubjectFingerprint(
+  title: string,
+  content: string,
+  category: string
+): string | null {
+  const text = (title + ' ' + content).toLowerCase();
+
+  // Find the primary entity mentioned
+  let entity: string | null = null;
+  for (const e of KNOWN_ENTITIES) {
+    if (text.includes(e)) {
+      entity = e.replace(/\s+/g, '-');
+      break;
+    }
+  }
+  if (!entity) return null;
+
+  // Find the claim type
+  let claimType = 'general';
+  for (const { pattern, type } of CLAIM_PATTERNS) {
+    if (pattern.test(text)) {
+      claimType = type;
+      break;
+    }
+  }
+
+  return `${category}:${entity}:${claimType}`;
+}
+
+// Static/negative state indicators - findings that represent "no change" or "still nothing"
+const STATIC_STATE_PATTERNS = [
+  /\b(no|not|hasn't|hasn't|does not|doesn't|still no|still not)\b.*\b(serve|support|available|entered|re-?enter|launch|change)/i,
+  /\b(gap|absent|unavailable|exited|withdrew|no signal|no change)\b/i,
+  /\bconfirmed.*\b(still|remains|continues)\b/i,
+  /\b(no re-?entry|not re-?entered|hasn't returned)\b/i,
+];
+
+// Positive state indicators - findings that represent actual change/news
+const POSITIVE_STATE_PATTERNS = [
+  /\b(re-?enter|re-?entry|return|back|launched|announced|now serve|now support)\b/i,
+  /\b(detected|confirmed.*new|breaking|just|today)\b/i,
+  /\b(change|update|increase|decrease|raised|funding)\b/i,
+];
+
+type FindingState = 'static' | 'positive' | 'neutral';
+
+/**
+ * Classify whether a finding represents a static/negative state ("still no")
+ * or a positive state change ("now yes" / "something happened").
+ */
+function classifyFindingState(title: string, content: string): FindingState {
+  const text = (title + ' ' + content).toLowerCase();
+
+  // Check for positive signals first (they take priority)
+  for (const pattern of POSITIVE_STATE_PATTERNS) {
+    if (pattern.test(text)) return 'positive';
+  }
+
+  // Check for static/negative signals
+  for (const pattern of STATIC_STATE_PATTERNS) {
+    if (pattern.test(text)) return 'static';
+  }
+
+  return 'neutral';
+}
+
+/**
+ * Get or update the last known state for a subject fingerprint.
+ * Used for delta-only reporting - only write new entries when state changes.
+ */
+async function getSubjectState(
+  db: ReturnType<typeof getDb> extends Promise<infer T> ? T : never,
+  fingerprint: string
+): Promise<{ state: FindingState; lastChecked: Date } | null> {
+  const record = await db.collection('hasmik_subject_states').findOne({ fingerprint });
+  if (!record) return null;
+  return {
+    state: record['state'] as FindingState,
+    lastChecked: new Date(record['lastChecked'] as Date),
+  };
+}
+
+async function updateSubjectState(
+  db: ReturnType<typeof getDb> extends Promise<infer T> ? T : never,
+  fingerprint: string,
+  state: FindingState,
+  title: string
+): Promise<void> {
+  await db.collection('hasmik_subject_states').updateOne(
+    { fingerprint },
+    {
+      $set: {
+        fingerprint,
+        state,
+        lastTitle: title,
+        lastChecked: new Date(),
+        updatedAt: new Date(),
+      },
+    },
+    { upsert: true }
+  );
+}
+
 export async function writeKnowledgeEntry(input: {
   title: string;
   content: string;
@@ -294,6 +432,57 @@ export async function writeKnowledgeEntry(input: {
 
   if (['linkedin_general', 'social', 'inferred'].includes(input.sourceType)) {
     return `BLOCKED: sourceType '${input.sourceType}' is not permitted in the knowledge base. Use write_inbox_signal instead.`;
+  }
+
+  // SUBJECT-LEVEL DEDUP: Check for existing non-expired entries covering the same subject
+  // This prevents duplicate entries like "Wise has NOT re-entered Armenia" written by
+  // different phases of the same run with slightly different titles.
+  const subjectFingerprint = extractSubjectFingerprint(input.title, input.content, input.category);
+  if (subjectFingerprint) {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const existing = await collection.findOne({
+      subjectFingerprint,
+      status: 'active',
+      $or: [
+        { expiresAt: { $gt: new Date() } },
+        { expiresAt: null },
+        { permanent: true },
+      ],
+      createdAt: { $gte: thirtyDaysAgo },
+    });
+    if (existing) {
+      const existingTitle = existing['title'] as string;
+      const existingDate = new Date(existing['createdAt'] as Date).toISOString().split('T')[0];
+      return `SKIPPED (dedup): An existing entry covers this subject. Existing: "${existingTitle}" (${existingDate})`;
+    }
+  }
+
+  // DELTA-ONLY REPORTING: For static/negative findings ("still no change"),
+  // only write a new entry if the state has actually changed from last check.
+  // This prevents "Wise still doesn't serve Armenia" from being written monthly forever.
+  const findingState = classifyFindingState(input.title, input.content);
+  let isStateChange = false;
+
+  if (subjectFingerprint && findingState !== 'neutral') {
+    const lastState = await getSubjectState(db, subjectFingerprint);
+
+    if (lastState) {
+      // If current finding is static and last state was also static, skip writing
+      // Just update the check timestamp
+      if (findingState === 'static' && lastState.state === 'static') {
+        await updateSubjectState(db, subjectFingerprint, 'static', input.title);
+        const daysSince = Math.floor((Date.now() - lastState.lastChecked.getTime()) / (1000 * 60 * 60 * 24));
+        return `SKIPPED (no-change): Static state unchanged since ${lastState.lastChecked.toISOString().split('T')[0]} (${daysSince}d ago). Check timestamp updated.`;
+      }
+
+      // If state changed (static → positive or positive → static), this is newsworthy
+      if (findingState !== lastState.state) {
+        isStateChange = true;
+      }
+    }
+
+    // Update state tracker (even for first-time observations)
+    await updateSubjectState(db, subjectFingerprint, findingState, input.title);
   }
 
   // URL VERIFICATION: For entries with sourceUrl, verify the URL actually exists
@@ -386,11 +575,15 @@ export async function writeKnowledgeEntry(input: {
   }
 
   let finalContent = input.content;
+  // State-change alerts get flagged prominently
+  if (isStateChange) {
+    finalContent = `🔔 [STATE CHANGE ALERT]: ${input.content}`;
+  }
   if (input.isOpinion && input.authorName) {
-    finalContent = `[Opinion — ${input.authorName}]: ${input.content}`;
+    finalContent = `[Opinion — ${input.authorName}]: ${finalContent}`;
   }
   if (input.sourceType === 'company') {
-    finalContent = `[Self-reported, unverified]: ${input.content}`;
+    finalContent = `[Self-reported, unverified]: ${finalContent}`;
   }
   // Add unverifiable warning to content if URL check failed (but not for bot-protected with valid pattern)
   if (input.sourceUrl && !urlVerified && !(urlBotProtected && urlPatternValid)) {
@@ -423,6 +616,9 @@ export async function writeKnowledgeEntry(input: {
     signalScore: score,
     noiseFlag: score <= 3,
     scope: input.agentScope ? 'professional' : 'organization',
+    subjectFingerprint: subjectFingerprint || null,
+    findingState: findingState,
+    isStateChange: isStateChange,
     // Support both single agent ID and array of agent IDs
     targetAgent: Array.isArray(input.agentScope)
       ? input.agentScope[0]
@@ -666,6 +862,26 @@ interface DomainResearchState {
   totalFindings?: number;
 }
 
+// Slow-tier domains: low-volatility checks that should run monthly, not weekly.
+// "Has competitor X entered/exited corridor Y" checks are inherently slow-moving.
+const SLOW_TIER_DOMAINS = [
+  'competitors-corridor-status', // Wise/Revolut Armenia re-entry checks
+  'competitors-pricing-baseline', // Static vendor pricing baselines
+];
+
+// Fast-tier domains: high-volatility, should run weekly
+const FAST_TIER_DOMAINS = [
+  'regulation-eu', 'regulation-us', 'regulation-aml',
+  'market-funding', 'market-eeca',
+  'technology-solana', 'technology-circle', 'technology-infra',
+];
+
+function getDomainTier(domain: string): 'slow' | 'fast' | 'normal' {
+  if (SLOW_TIER_DOMAINS.includes(domain) || domain.includes('corridor-status')) return 'slow';
+  if (FAST_TIER_DOMAINS.includes(domain)) return 'fast';
+  return 'normal';
+}
+
 export async function getDomainResearchState(input: {
   domain: string;
 }): Promise<string> {
@@ -674,15 +890,30 @@ export async function getDomainResearchState(input: {
     domain: input.domain,
   }) as DomainResearchState | null;
 
+  const tier = getDomainTier(input.domain);
+  const skipThresholdDays = tier === 'slow' ? 30 : tier === 'fast' ? 5 : 7;
+
   if (!state) {
-    return `Domain "${input.domain}" has never been researched. Perform full survey.`;
+    return `Domain "${input.domain}" has never been researched. Tier: ${tier} (skip if <${skipThresholdDays}d old). Perform full survey.`;
   }
 
   const daysSince = Math.floor((Date.now() - new Date(state.lastResearchedAt).getTime()) / (1000 * 60 * 60 * 24));
   const dateStr = new Date(state.lastResearchedAt).toISOString().split('T')[0];
 
+  // Slow-tier domains: skip entirely if researched within 30 days
+  if (tier === 'slow' && daysSince < skipThresholdDays) {
+    return [
+      `Domain: ${input.domain} (SLOW-TIER)`,
+      `Last researched: ${dateStr} (${daysSince} days ago)`,
+      ``,
+      `⚠️ SKIP THIS DOMAIN: Slow-tier domain, only due every ${skipThresholdDays} days.`,
+      `Next due: ${new Date(new Date(state.lastResearchedAt).getTime() + skipThresholdDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}`,
+      `Prior findings: ${state.lastFindingsCount} items`,
+    ].join('\n');
+  }
+
   return [
-    `Domain: ${input.domain}`,
+    `Domain: ${input.domain} (${tier.toUpperCase()}-TIER)`,
     `Last researched: ${dateStr} (${daysSince} days ago)`,
     `Findings that run: ${state.lastFindingsCount}`,
     state.lastTopFindings.length > 0
@@ -745,8 +976,11 @@ export async function listAllDomainStates(): Promise<string> {
   const lines = states.map(s => {
     const daysSince = Math.floor((Date.now() - new Date(s.lastResearchedAt).getTime()) / (1000 * 60 * 60 * 24));
     const dateStr = new Date(s.lastResearchedAt).toISOString().split('T')[0];
+    const tier = getDomainTier(s.domain);
+    const skipThreshold = tier === 'slow' ? 30 : tier === 'fast' ? 5 : 7;
+    const skipNote = daysSince < skipThreshold ? ' [SKIP]' : '';
     const costNote = s.lastWebSearchCount ? `, ${s.lastWebSearchCount} searches (~$${(s.lastEstimatedCostUsd ?? 0).toFixed(2)})` : '';
-    return `- ${s.domain}: ${dateStr} (${daysSince}d ago), ${s.lastFindingsCount} findings${costNote}`;
+    return `- ${s.domain} [${tier}]: ${dateStr} (${daysSince}d ago), ${s.lastFindingsCount} findings${costNote}${skipNote}`;
   });
 
   const totalSearches = states.reduce((sum, s) => sum + (s.totalWebSearches ?? 0), 0);
@@ -757,7 +991,7 @@ export async function listAllDomainStates(): Promise<string> {
     ...lines,
     '',
     `Cumulative: ${totalFindings} findings, ${totalSearches} web searches (~$${(totalSearches * 0.03).toFixed(2)})`,
-    'Domains older than 7 days need fresh survey. Recent domains: incremental search only.',
+    'Tier thresholds: SLOW=30d, NORMAL=7d, FAST=5d. Domains marked [SKIP] are not yet due.',
   ].join('\n');
 }
 
