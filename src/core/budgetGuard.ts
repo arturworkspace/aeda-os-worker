@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import { costLedgerRepo } from '../db/repos/costLedger.repo.js';
 import { budgetRepo } from '../db/repos/budget.repo.js';
+import { founderInboxRepo } from '../db/repos/founderInbox.repo.js';
 import { writeAuditEvent } from './auditLog.js';
 import { logger } from '../logger.js';
 
@@ -100,6 +101,15 @@ export async function checkBudget(
         smokeTest: scopeRefs.smokeTest ?? false,
       });
 
+      // Alert to Founder Inbox
+      if (!scopeRefs.smokeTest) {
+        await founderInboxRepo.insert({
+          source: 'budget-guard',
+          title: '🛑 Budget blocked — global cap reached',
+          content: `AI call blocked: global monthly spend ($${globalSpend.toFixed(2)}) has reached the $${globalBudget.monthlyCapUsd} cap. Estimated call cost: $${estimatedMaxUsd.toFixed(4)}.\n\nAction: Check Anthropic Console for usage limits, or increase the cap in os_budgets collection.`,
+        });
+      }
+
       throw new BudgetExceededError(
         'global',
         'global',
@@ -128,6 +138,15 @@ export async function checkBudget(
           },
           smokeTest: scopeRefs.smokeTest ?? false,
         });
+
+        // Alert to Founder Inbox
+        if (!scopeRefs.smokeTest) {
+          await founderInboxRepo.insert({
+            source: 'budget-guard',
+            title: `🛑 Budget blocked — ${scopeRefs.projectKey} cap reached`,
+            content: `AI call blocked: project "${scopeRefs.projectKey}" monthly spend ($${projectSpend.toFixed(2)}) has reached the $${projectBudget.monthlyCapUsd} cap. Estimated call cost: $${estimatedMaxUsd.toFixed(4)}.`,
+          });
+        }
 
         throw new BudgetExceededError(
           'project',
@@ -206,6 +225,14 @@ export async function checkBudgetWarning(): Promise<boolean> {
           threshold: warnThreshold,
         },
       });
+
+      // Alert to Founder Inbox (once per day)
+      await founderInboxRepo.insert({
+        source: 'budget-guard',
+        title: `⚠️ Budget warning — ${globalBudget.warnAtPct}% of monthly cap used`,
+        content: `Global monthly spend ($${globalSpend.toFixed(2)}) has crossed the ${globalBudget.warnAtPct}% warning threshold ($${warnThreshold.toFixed(2)} of $${globalBudget.monthlyCapUsd} cap).\n\nThis alert fires once per day. Review spend in OS Dashboard.`,
+      });
+
       logger.warn(
         { currentSpend: globalSpend, cap: globalBudget.monthlyCapUsd, warnAtPct: globalBudget.warnAtPct },
         'budget warning threshold crossed'
