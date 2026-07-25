@@ -774,7 +774,7 @@ export async function runHasmikIntelligence(): Promise<void> {
       model: 'claude-sonnet-4-6',
       systemPrompt: HASMIK_SYSTEM_PROMPT,
       initialMessage: buildInitialMessage(),
-      maxIterations: 20,  // Reduced from 30 — testing cost savings vs coverage tradeoff
+      maxIterations: 30,
       agentId: 'hasmik',
       jobName: JOB_NAME,
       builtInTools: [{ type: 'web_search_20250305', name: 'web_search' }],
