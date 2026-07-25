@@ -131,6 +131,37 @@ export const costLedgerRepo = {
     return result[0]?.total ?? 0;
   },
 
+  async getDayToDateByAgentOrJob(
+    agentOrJob: string,
+    excludeSmokeTest = true
+  ): Promise<number> {
+    // Use Europe/Prague timezone for day boundary (consistent with scheduled jobs)
+    const now = new Date();
+    const pragueOffset = getPragueOffset(now);
+    const pragueNow = new Date(now.getTime() + pragueOffset);
+    const startOfDayPrague = new Date(
+      pragueNow.getFullYear(),
+      pragueNow.getMonth(),
+      pragueNow.getDate()
+    );
+    const startOfDayUtc = new Date(startOfDayPrague.getTime() - pragueOffset);
+
+    const query: FilterQuery<ICostLedger> = {
+      ts: { $gte: startOfDayUtc },
+      agentOrJob,
+    };
+    if (excludeSmokeTest) {
+      query['smokeTest'] = { $ne: true };
+    }
+
+    const result = await CostLedger.aggregate([
+      { $match: query },
+      { $group: { _id: null, total: { $sum: '$costUsd' } } },
+    ]).exec();
+
+    return result[0]?.total ?? 0;
+  },
+
   async getYesterdayAggregates(): Promise<{
     totalCostUsd: number;
     totalInputTokens: number;

@@ -62,6 +62,7 @@ export async function routedCall(input: RoutedCallInput): Promise<RoutedCallResu
     packageId: input.packageId ?? null,
     projectKey: input.projectKey ?? null,
     smokeTest: input.smokeTest ?? false,
+    agentOrJob: input.agentOrJob,
   });
 
   let model = primary;
