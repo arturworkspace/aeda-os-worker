@@ -317,61 +317,42 @@ DOMAIN NAMING CONVENTION (use these exact names):
 
 This tracking reduces your web_search calls by 50-70% on typical runs.`;
 
-function buildInitialMessage(): string {
+// Cost fix (2026-07-27): Phase 2 (20 agents x 1-3 web-searched entries each)
+// was the dominant cost driver in this job — running it on every weekly
+// firing put actual spend at ~7-11x the documented $0.35/run estimate.
+// Phase 1 (org-wide intel) is the load-bearing part and stays weekly; Phase 2
+// now runs biweekly, gated by a marker document rather than by ISO week
+// parity so it survives schedule drift/missed runs. 13 days (not 14) gives a
+// one-day grace margin against the cron firing slightly early.
+const PHASE2_MIN_INTERVAL_DAYS = 13;
+const PHASE2_STATE_COLLECTION = 'os_hasmik_state';
+const PHASE2_STATE_ID = 'phase2LastRun';
+
+async function shouldRunPhase2(): Promise<boolean> {
+  const db = await getDb();
+  const doc = await db.collection(PHASE2_STATE_COLLECTION).findOne({ _id: PHASE2_STATE_ID as unknown as never });
+  if (!doc || !doc['lastRunAt']) return true;
+  const daysSince = (Date.now() - new Date(doc['lastRunAt']).getTime()) / (1000 * 60 * 60 * 24);
+  return daysSince >= PHASE2_MIN_INTERVAL_DAYS;
+}
+
+async function markPhase2Ran(): Promise<void> {
+  const db = await getDb();
+  await db.collection(PHASE2_STATE_COLLECTION).updateOne(
+    { _id: PHASE2_STATE_ID as unknown as never },
+    { $set: { lastRunAt: new Date() } },
+    { upsert: true }
+  );
+}
+
+function buildInitialMessage(includePhase2: boolean): string {
   const today = new Date().toISOString().split('T')[0];
   const weekStart = new Date();
   weekStart.setDate(weekStart.getDate() - weekStart.getDay());
   const weekStartStr = weekStart.toISOString().split('T')[0];
 
-  return `Run this week's intelligence scan for aeda.
-Today: ${today}. Current week started: ${weekStartStr}.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PHASE 0: CHECK RESEARCH STATE (MANDATORY)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-BEFORE any research, call list_domain_research_states to see what was
-already researched and when. This determines your research strategy:
-
-- Domains <3 days old: SKIP entirely (unlikely to have new developments)
-- Domains 3-7 days old: INCREMENTAL search only (use "since:YYYY-MM-DD")
-- Domains >7 days old: Full survey
-
-This saves ~50% of web_search calls on typical runs.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PHASE 1: ORGANIZATION-WIDE INTELLIGENCE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-1. Read recent knowledge titles (call read_recent_knowledge_titles
-   for each category) to understand what already exists.
-
-2. Research and write entries domain by domain (respecting incremental rules):
-   - Regulation: EBA, ESMA, EC, ECB, CNB, CBA, FATF, SEC, CFTC
-   - Technology: Solana, Circle EURC, Bridge.xyz, Sumsub, Helius
-   - Product: Circle EURC updates, Bridge.xyz, Sumsub, Privy, Helius
-   - Competitors: all 11 stablecoin apps + 8 remittance players
-   - Wise specifically: any Armenia re-entry signal?
-   - Market: EU pre-seed fintech raises THIS WEEK ONLY
-     CRITICAL: Search specifically for "fintech funding announced today"
-     or "fintech raised this week" — the 14-day freshness filter will
-     reject anything older. Focus on announcements from the past 7 days.
-   - Influencers: Simon Taylor, Nic Carter, Marcel van Oost,
-     Jeremy Allaire — blogs and newsletters only
-
-3. For any significant LinkedIn content not from your monitored list:
-   use write_inbox_signal, not write_knowledge_entry.
-
-4. For any suspicious or unverifiable claims:
-   use write_inbox_signal with type 'potential-misinformation'.
-
-5. Write all relevant fundraising opportunities for aeda.
-
-6. AFTER EACH DOMAIN: Call update_domain_research_state with:
-   - domain name (use standard names: regulation-eu, competitors-stablecoin, etc.)
-   - findingsCount: how many entries you wrote
-   - topFindings: titles of the 3 most significant findings
-
+  const phase2Section = includePhase2
+    ? `
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PHASE 2: AGENT-SPECIFIC PROFESSIONAL UPDATES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -461,7 +442,66 @@ ofelya (Brand & UX Auditor):
 CRITICAL: For Phase 2, every write_knowledge_entry call MUST include
 agentScope: '<agent-id>' (e.g., agentScope: 'vagho'). Entries without
 agentScope will not appear in the agent's knowledge feed.
+`
+    : `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PHASE 2: AGENT-SPECIFIC PROFESSIONAL UPDATES — SKIPPED THIS RUN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+Phase 2 runs biweekly (cost control) and was already run within the last
+${PHASE2_MIN_INTERVAL_DAYS} days. Do NOT research or write any agentScope
+entries this run. Go straight from Phase 1 to Phase 3.
+`;
+
+  return `Run this week's intelligence scan for aeda.
+Today: ${today}. Current week started: ${weekStartStr}.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PHASE 0: CHECK RESEARCH STATE (MANDATORY)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+BEFORE any research, call list_domain_research_states to see what was
+already researched and when. This determines your research strategy:
+
+- Domains <3 days old: SKIP entirely (unlikely to have new developments)
+- Domains 3-7 days old: INCREMENTAL search only (use "since:YYYY-MM-DD")
+- Domains >7 days old: Full survey
+
+This saves ~50% of web_search calls on typical runs.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PHASE 1: ORGANIZATION-WIDE INTELLIGENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Read recent knowledge titles (call read_recent_knowledge_titles
+   for each category) to understand what already exists.
+
+2. Research and write entries domain by domain (respecting incremental rules):
+   - Regulation: EBA, ESMA, EC, ECB, CNB, CBA, FATF, SEC, CFTC
+   - Technology: Solana, Circle EURC, Bridge.xyz, Sumsub, Helius
+   - Product: Circle EURC updates, Bridge.xyz, Sumsub, Privy, Helius
+   - Competitors: all 11 stablecoin apps + 8 remittance players
+   - Wise specifically: any Armenia re-entry signal?
+   - Market: EU pre-seed fintech raises THIS WEEK ONLY
+     CRITICAL: Search specifically for "fintech funding announced today"
+     or "fintech raised this week" — the 14-day freshness filter will
+     reject anything older. Focus on announcements from the past 7 days.
+   - Influencers: Simon Taylor, Nic Carter, Marcel van Oost,
+     Jeremy Allaire — blogs and newsletters only
+
+3. For any significant LinkedIn content not from your monitored list:
+   use write_inbox_signal, not write_knowledge_entry.
+
+4. For any suspicious or unverifiable claims:
+   use write_inbox_signal with type 'potential-misinformation'.
+
+5. Write all relevant fundraising opportunities for aeda.
+
+6. AFTER EACH DOMAIN: Call update_domain_research_state with:
+   - domain name (use standard names: regulation-eu, competitors-stablecoin, etc.)
+   - findingsCount: how many entries you wrote
+   - topFindings: titles of the 3 most significant findings
+${phase2Section}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PHASE 3: SUMMARY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -769,11 +809,14 @@ export async function runHasmikIntelligence(): Promise<void> {
     logger.error({ error: (err as Error).message, stack: (err as Error).stack }, '[hasmik] failed to write job_start audit event');
   }
 
+  const includePhase2 = await shouldRunPhase2();
+  logger.info({ includePhase2 }, '[hasmik] Phase 2 (per-agent professional intel) gate for this run');
+
   try {
     const result = await runAgentLoop({
       model: 'claude-sonnet-4-6',
       systemPrompt: HASMIK_SYSTEM_PROMPT,
-      initialMessage: buildInitialMessage(),
+      initialMessage: buildInitialMessage(includePhase2),
       maxIterations: 30,
       agentId: 'hasmik',
       jobName: JOB_NAME,
@@ -789,6 +832,12 @@ export async function runHasmikIntelligence(): Promise<void> {
         }],
       },
     });
+
+    // Record Phase 2 completion only after a successful run, so a run that
+    // errors mid-loop retries Phase 2 next firing instead of losing a cycle.
+    if (includePhase2) {
+      await markPhase2Ran();
+    }
 
     const verification = await runVerificationPass(jobStartTime);
     const durationMs = Date.now() - startMs;

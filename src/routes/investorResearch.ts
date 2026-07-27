@@ -396,6 +396,68 @@ CONTACT: ${researchData.contactName || 'Not found'}
     messages: [{ role: 'user' as const, content: `Score this investor's fit for aeda:\n\n${researchSummary}` }],
   };
 
+  // Regex-repair helper. Haiku occasionally breaks the nested
+  // {score, reasoning} schema under longer research inputs — reproduced two
+  // distinct malformed shapes for the same investor. Cost fix (2026-07-27):
+  // this used to only run AFTER burning up to 3 full retry API calls on the
+  // exact same request (no feedback between attempts, purely hoping
+  // non-determinism fixed it). Now it's tried on each attempt's raw output
+  // immediately, before deciding to retry — most malformed responses are
+  // repairable for free, so this usually avoids the retry entirely.
+  function tryRepairScoringOutput(attempt: unknown): { repaired: ScoringOutput; repairedDims: string[] } | null {
+    if (!attempt || typeof attempt !== 'object') return null;
+    const dimensions = ['thesis', 'stage', 'geo', 'checkSize', 'portfolio', 'impact', 'network'] as const;
+    const xmlLeakRegex = /<parameter name="score">(\d+)/;
+
+    const raw = attempt as Record<string, unknown>;
+    const repairedRaw = { ...raw };
+    const repairedDims: string[] = [];
+    let canRepair = true;
+    const topLevelReasoning = typeof raw['reasoning'] === 'string' ? raw['reasoning'] : null;
+
+    for (const dim of dimensions) {
+      if (isValidDimensionScore(raw[dim])) continue; // already valid
+
+      // Shape A: dim is a flat numeric string, reasoning lives in a sibling
+      // key ("thesisReasoning" or "thesis.reasoning").
+      const siblingReasoningKey = Object.keys(raw).find(
+        k => k === `${dim}Reasoning` || k === `${dim}.reasoning`
+      );
+      const flatScore = typeof raw[dim] === 'string' ? parseInt(raw[dim] as string, 10) : NaN;
+
+      if (!isNaN(flatScore) && siblingReasoningKey && typeof raw[siblingReasoningKey] === 'string') {
+        repairedRaw[dim] = { score: flatScore, reasoning: raw[siblingReasoningKey] };
+        delete repairedRaw[siblingReasoningKey];
+        repairedDims.push(dim);
+        continue;
+      }
+
+      // Shape B: dim string contains a leaked XML-style tool-call fragment
+      // with the score, reasoning falls back to the top-level "reasoning".
+      if (typeof raw[dim] === 'string' && xmlLeakRegex.test(raw[dim] as string)) {
+        const match = (raw[dim] as string).match(xmlLeakRegex);
+        if (match && match[1]) {
+          const extractedScore = parseInt(match[1], 10);
+          repairedRaw[dim] = {
+            score: extractedScore,
+            reasoning: topLevelReasoning || 'Reasoning not available due to a model formatting issue for this dimension.',
+          };
+          repairedDims.push(dim);
+          continue;
+        }
+      }
+
+      // Unknown malformed shape for this dimension — this attempt can't be repaired.
+      canRepair = false;
+      break;
+    }
+
+    if (canRepair && repairedDims.length > 0 && isValidScoringOutput(repairedRaw)) {
+      return { repaired: repairedRaw as ScoringOutput, repairedDims };
+    }
+    return null;
+  }
+
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let totalCacheCreationTokens = 0;
@@ -403,7 +465,6 @@ CONTACT: ${researchData.contactName || 'Not found'}
   let scoringData: ScoringOutput | null = null;
   let attemptCount = 0;
   let lastRawInput: unknown = null;
-  const rawAttempts: unknown[] = [];
   const maxAttempts = 3;
 
   while (attemptCount < maxAttempts && !scoringData) {
@@ -423,83 +484,25 @@ CONTACT: ${researchData.contactName || 'Not found'}
       }
     }
 
-    if (lastRawInput) rawAttempts.push(lastRawInput);
-
     if (lastRawInput && isValidScoringOutput(lastRawInput)) {
       scoringData = lastRawInput;
+      continue;
+    }
+
+    // Try the free repair before spending another API call on a retry.
+    const repairResult = lastRawInput ? tryRepairScoringOutput(lastRawInput) : null;
+    if (repairResult) {
+      scoringData = repairResult.repaired;
+      logger.info(
+        { investorId, attempt: attemptCount, repairedDimensions: repairResult.repairedDims },
+        `repaired ${repairResult.repairedDims.length} malformed dimension(s) via regex extraction, no retry needed: ${repairResult.repairedDims.join(', ')}`
+      );
     } else {
       const rawContentPreview = JSON.stringify(scoringResponse.content).slice(0, 500);
       logger.warn(
         { investorId, attempt: attemptCount, rawContentPreview },
-        'malformed scoring tool_use response, ' + (attemptCount < maxAttempts ? 'retrying' : 'attempting repair')
+        'malformed scoring tool_use response, unrepairable, ' + (attemptCount < maxAttempts ? 'retrying' : 'giving up')
       );
-    }
-  }
-
-  // Regex-repair fallback. Haiku occasionally breaks the nested
-  // {score, reasoning} schema under longer research inputs — reproduced two
-  // distinct malformed shapes for the same investor across 3 attempts, so
-  // every attempt (not just the last) gets a repair chance, tried in order.
-  if (!scoringData) {
-    const dimensions = ['thesis', 'stage', 'geo', 'checkSize', 'portfolio', 'impact', 'network'] as const;
-    const xmlLeakRegex = /<parameter name="score">(\d+)/;
-
-    for (const attempt of rawAttempts) {
-      if (!attempt || typeof attempt !== 'object') continue;
-      const raw = attempt as Record<string, unknown>;
-      const repairedRaw = { ...raw };
-      const extractedScores: Record<string, number> = {};
-      const repairedDims: string[] = [];
-      let canRepair = true;
-      const topLevelReasoning = typeof raw['reasoning'] === 'string' ? raw['reasoning'] : null;
-
-      for (const dim of dimensions) {
-        if (isValidDimensionScore(raw[dim])) continue; // already valid
-
-        // Shape A: dim is a flat numeric string, reasoning lives in a sibling
-        // key ("thesisReasoning" or "thesis.reasoning").
-        const siblingReasoningKey = Object.keys(raw).find(
-          k => k === `${dim}Reasoning` || k === `${dim}.reasoning`
-        );
-        const flatScore = typeof raw[dim] === 'string' ? parseInt(raw[dim] as string, 10) : NaN;
-
-        if (!isNaN(flatScore) && siblingReasoningKey && typeof raw[siblingReasoningKey] === 'string') {
-          repairedRaw[dim] = { score: flatScore, reasoning: raw[siblingReasoningKey] };
-          delete repairedRaw[siblingReasoningKey];
-          extractedScores[dim] = flatScore;
-          repairedDims.push(dim);
-          continue;
-        }
-
-        // Shape B: dim string contains a leaked XML-style tool-call fragment
-        // with the score, reasoning falls back to the top-level "reasoning".
-        if (typeof raw[dim] === 'string' && xmlLeakRegex.test(raw[dim] as string)) {
-          const match = (raw[dim] as string).match(xmlLeakRegex);
-          if (match && match[1]) {
-            const extractedScore = parseInt(match[1], 10);
-            repairedRaw[dim] = {
-              score: extractedScore,
-              reasoning: topLevelReasoning || 'Reasoning not available due to a model formatting issue for this dimension.',
-            };
-            extractedScores[dim] = extractedScore;
-            repairedDims.push(dim);
-            continue;
-          }
-        }
-
-        // Unknown malformed shape for this dimension — this attempt can't be repaired.
-        canRepair = false;
-        break;
-      }
-
-      if (canRepair && repairedDims.length > 0 && isValidScoringOutput(repairedRaw)) {
-        scoringData = repairedRaw as ScoringOutput;
-        logger.info(
-          { investorId, repairedDimensions: repairedDims, extractedScores },
-          `repaired ${repairedDims.length} malformed dimension(s) via regex extraction: ${repairedDims.join(', ')}`
-        );
-        break;
-      }
     }
   }
 
@@ -1147,59 +1150,59 @@ CONTACT:
     let wordCountRetries = 0;
     let wordCount = parsedDraft.body.split(/\s+/).filter(Boolean).length;
 
+    // Cost fix (2026-07-27): this previously re-ran the FULL Sonnet draft
+    // generation (with the entire research context re-sent) up to twice more
+    // whenever the draft ran long — paying full input+output cost again just
+    // to shorten text that was already written. Trimming the existing body
+    // on Haiku (no research context needed, it's a pure text-editing task)
+    // keeps the same hard word-count ceiling at a fraction of the cost.
+    // subjectOptions/personalizationReasoning are untouched — only the body
+    // gets shortened.
     while (wordCount > MAX_WORD_COUNT && wordCountRetries < MAX_WORD_COUNT_RETRIES) {
       wordCountRetries++;
       logger.warn(
         { investorId, wordCount, attempt: wordCountRetries },
-        `draft exceeds ${MAX_WORD_COUNT} word limit, regenerating`
+        `draft exceeds ${MAX_WORD_COUNT} word limit, trimming via Haiku`
       );
 
-      const retryResponse = await anthropic.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1024,
-        system: [
-          {
-            type: 'text',
-            text: FIRST_EMAIL_DRAFTING_SYSTEM,
-            cache_control: { type: 'ephemeral' },
-          },
-        ],
+      const trimResponse = await anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 400,
+        system: 'You trim cold-outreach email bodies to fit a strict word limit while preserving the tone, personalization, and call to action exactly as written. Do not add new claims or change the meaning. Return ONLY the trimmed email body text — no JSON, no preamble, no explanation, no quotes around it.',
         messages: [{
           role: 'user',
-          content: `Draft a first-outreach email to this investor:\n\n${researchContext}\n\nIMPORTANT: Your previous draft was ${wordCount} words. The MAXIMUM is ${MAX_WORD_COUNT} words. Be more concise.`,
+          content: `This email body is ${wordCount} words. Trim it to at most ${MAX_WORD_COUNT} words:\n\n---\n${parsedDraft.body}`,
         }],
       });
 
-      const retryCost = estimateCostUsd('claude-sonnet-4-6', {
-        input_tokens: retryResponse.usage.input_tokens,
-        output_tokens: retryResponse.usage.output_tokens,
-        cache_creation_input_tokens: (retryResponse.usage as { cache_creation_input_tokens?: number }).cache_creation_input_tokens,
-        cache_read_input_tokens: (retryResponse.usage as { cache_read_input_tokens?: number }).cache_read_input_tokens,
+      const trimCost = estimateCostUsd('claude-haiku-4-5-20251001', {
+        input_tokens: trimResponse.usage.input_tokens,
+        output_tokens: trimResponse.usage.output_tokens,
       });
-      totalCostUsd += retryCost;
+      totalCostUsd += trimCost;
 
       await costLedgerRepo.insert({
         agentOrJob: 'investor-email-draft',
         packageId: null,
         projectKey: null,
-        llmModel: 'claude-sonnet-4-6',
-        inputTokens: retryResponse.usage.input_tokens,
-        outputTokens: retryResponse.usage.output_tokens,
-        costUsd: retryCost,
-        estimatedMaxUsd: retryCost,
+        llmModel: 'claude-haiku-4-5-20251001',
+        inputTokens: trimResponse.usage.input_tokens,
+        outputTokens: trimResponse.usage.output_tokens,
+        costUsd: trimCost,
+        estimatedMaxUsd: trimCost,
         tier: 'production',
       });
 
-      let retryText = '';
-      for (const block of retryResponse.content) {
+      let trimmedBody = '';
+      for (const block of trimResponse.content) {
         if (block.type === 'text') {
-          retryText += block.text;
+          trimmedBody += block.text;
         }
       }
+      trimmedBody = trimmedBody.trim();
 
-      const retryParsed = parseFirstEmailDraftResponse(retryText);
-      if (retryParsed) {
-        parsedDraft = retryParsed;
+      if (trimmedBody) {
+        parsedDraft = { ...parsedDraft, body: trimmedBody };
         wordCount = parsedDraft.body.split(/\s+/).filter(Boolean).length;
       }
     }
